@@ -1,0 +1,254 @@
+---
+title: "Wet SOC Persistence: Data processing"
+format: 
+    html:
+        embed-resources: false
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(formatR)
+library(openxlsx)
+library(here)
+
+knitr::opts_chunk$set(fig.align = "center", fig.show = "hold", dpi = 100,
+                      tidy.opts = list(width.cutoff = 60), 
+                      tidy = T, 
+                      collapse = TRUE, 
+                      echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE)
+
+rgl::setupKnitr(autoprint = TRUE)
+here::here()
+```
+
+## Import lab excel datasheets from local drive on computer
+
+```{r}
+
+HLEF_HPU <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION") |> 
+  dplyr::select(sample_name, HPU) |> 
+  dplyr::rename(sample_ID = sample_name)
+
+readr::write_csv(HLEF_HPU, here("data/dataframes/HLEF_HPUonly.csv"))
+
+
+HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |> 
+  dplyr::select(c(1:14)) |>
+  dplyr::mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
+                                (depth_cm - lag(depth_cm)) < 0 ~ 0, 
+                                .default = lag(depth_cm)), 
+                bottom = depth_cm, 
+                #center = abs(top - (top - bottom)/2),
+                thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+                                  (bottom-top) < 0 ~ bottom,
+                                  #bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
+                                  #bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
+                                  #bottom > 100 & top > 100 ~ 0,
+                                  #bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
+                                  #bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
+                                  #bottom == 100 ~ bottom - lag(bottom),
+                                  .default = bottom-top),
+                SOC_hor_stock = 100*((carbon_perc/100)*BD_g_cm3*thick*(1-(rock_perc/100))))
+readr::write_csv(HLEF_SOC_All, here("data/dataframes/HLEF_SOC_AllOrgMin.csv"))
+
+```
+
+
+### Water Extractable Organic Carbon
+
+```{r}
+toc_batch1 <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/TOC/Anthony_Batch1_010224.csv")
+toc_batch2 <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/TOC/Anthony_Batch2_010324.csv")
+numName <- read.csv(here("data/dataframes/HLEF_TOC_NumName.csv")) |> mutate(Num = as.character(Num))
+glimpse(toc_batch1)
+
+toc_batch1_form <- toc_batch1 |> dplyr::select(Name, TIC..mg.l., TOC..Diff....mg.l.) |> 
+    dplyr::filter(!str_detect(Name, "Blank|blank|RunIn|standard")) |> 
+    na.omit() |> 
+    group_by(Name) |> 
+    summarise(Num = first(Name), 
+              TIC = mean(TIC..mg.l.),
+              TOC = mean(TOC..Diff....mg.l.)) |> 
+    dplyr::select(-Name)
+toc_batch2_form <- toc_batch2 |> dplyr::select(Name, TIC..mg.l., TOC..Diff....mg.l.) |> 
+    dplyr::filter(!str_detect(Name, "Blank|blank|RunIn|standard")) |> 
+    na.omit() |> 
+    group_by(Name) |> 
+    summarise(Num = first(Name), 
+              TIC = mean(TIC..mg.l.),
+              TOC = mean(TOC..Diff....mg.l.)) |> 
+    dplyr::select(-Name)
+
+toc_all <- rbind(toc_batch1_form, toc_batch2_form) |>
+    left_join(y = numName, by = join_by(Num)) |>
+    dplyr::relocate(Name, Num, TIC, TOC) |> 
+    filter(Name != "Blank")
+
+readr::write_csv(toc_all, here("data/dataframes/HLEF_TOC_MineralSoils.csv"))
+
+```
+
+
+### Data filtering for Heavy Fraction Fine (HFF):
+
+- filter for HFF data
+- add columns for HFF mgC/gSoil and silt+clay
+
+```{r}
+HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |>
+    mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
+                               .default = lag(depth_cm)), 
+            bottom = depth_cm, 
+            center = abs(top - (top - bottom)/2),
+            thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+                              bottom - lag(bottom) < 0 ~ bottom,
+                              bottom - lag(bottom) > 0 ~ bottom - lag(bottom)),
+            thick100 = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+                                    bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
+                                    bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
+                                    bottom > 100 & top > 100 ~ 0,
+                                    bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
+                                    bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
+                                    bottom == 100 ~ bottom - lag(bottom),
+                                    .default = 0),
+           SOC_hor_stock100 = 100*((carbon_perc/100)*BD_g_cm3*thick100*(1-(rock_perc/100))),
+           SOC_hor_stock = 100*((carbon_perc/100)*BD_g_cm3*thick*(1-(rock_perc/100))),
+           HFF_SOC_hor_stock_100 =
+               100*((HFF_percC/100)*BD_g_cm3*thick100*(1-(rock_perc/100))*((HFF_perc))),
+           HFF_SOC_hor_stock =
+               100*((HFF_percC/100)*BD_g_cm3*thick*(1-(rock_perc/100))*((HFF_perc)))
+           #name_short = paste0(str_sub(sample_ID, start = 1L, end = 3L))
+           )
+
+HLEF_loc <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION", detectDates = TRUE) |> 
+    filter(sample_name != "PRE-2022")
+
+l_n <- lm((nitrogen_perc) ~ carbon_perc + 0, data = HLEF_Full |> filter(nitrogen_perc >0) |> na.omit())
+p_n <- predict(l_n, data.frame(carbon_perc = HLEF_Full[HLEF_Full$nitrogen_perc == 0, "carbon_perc"][1]))
+
+HLEF_HFF <- HLEF_Full |> 
+    left_join(HLEF_loc |> select(sample_name, HPU),
+              by = join_by(sample_ID == sample_name)) |> 
+    filter(!is.na(HFF_percC)) |> 
+    left_join(y = toc_all |> dplyr::select(Name, TIC, TOC), by = join_by(HLEF_ID == Name)) |> 
+    mutate(SOC_mgC_gSoil = (carbon_perc/100)*1000,
+           HFF_mgC_gSoil = (HFF_percC/100)*(HFF/df_start_wt)*1000,
+           HFF_percC_of_soilC = ((HFF_percC/100)*HFF)/((carbon_perc/100)*df_start_wt),
+           HFF_CN = HFF_percC/HFF_percN,
+           siltclay = silt+clay,
+           depth_cm = center,
+           nitrogen_perc = case_when(nitrogen_perc == 0 ~ 0.01,
+                              .default = nitrogen_perc),
+           bulkCN = carbon_perc/nitrogen_perc) |> 
+    dplyr::select(sample_ID, HLEF_ID, HPU, lat, lon, depth_cm, BD_g_cm3, rock_perc, 
+                  carbon_perc, TIC, TOC, bulkCN,
+                  nitrogen_perc, ph, clay, siltclay, silt, sand, 
+                  SOC_mgC_gSoil, SOC_hor_stock, SOC_hor_stock100,
+                  HFF_percC, HFF_mgC_gSoil, HFF_CN, HFF_SOC_hor_stock, HFF_SOC_hor_stock_100)
+
+
+
+readr::write_csv(HLEF_HFF, here("data/dataframes/HLEF_HFF_SOConly.csv"))
+```
+
+
+```{r}
+target_maom14C <- c("HFF_mgC_gSoil", "delta_14C", "delta_14C_adj")
+
+ICP_DC <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
+    filter(Extract == "DithCit") |> 
+    mutate(Al_mg_gSoil = (Al_ppm*(extract_vol_ml/1000))/(weight_g),
+           Fe_mg_gSoil = (Fe_ppm*(extract_vol_ml/1000))/(weight_g),
+           Si_mg_gSoil = (Si_ppm*(extract_vol_ml/1000))/(weight_g),
+           Ca_mg_gSoil = (Ca_ppm*(extract_vol_ml/1000))/(weight_g),
+           Mn_mg_gSoil = (Mn_ppm*(extract_vol_ml/1000))/(weight_g))
+ICP_AO <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
+    filter(Extract == "AmmOx")  |> 
+    mutate(Al_mg_gSoil = (Al_ppm*(extract_vol_ml/1000))/(weight_g),
+           Fe_mg_gSoil = (Fe_ppm*(extract_vol_ml/1000))/(weight_g),
+           Si_mg_gSoil = (Si_ppm*(extract_vol_ml/1000))/(weight_g),
+           Ca_mg_gSoil = (Ca_ppm*(extract_vol_ml/1000))/(weight_g),
+           Mn_mg_gSoil = (Mn_ppm*(extract_vol_ml/1000))/(weight_g))
+
+CAMS_14C <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/14C/14C_Dataframe.xlsx", sheet = 1) |> 
+    dplyr::rename("delta_14C" = "∆14C") |>
+    arrange(desc(HLEF_ID))
+
+HLEF_HFF_14C_DithCit_df <- HLEF_HFF |> 
+    dplyr::left_join(y = CAMS_14C, by = join_by("HLEF_ID")) |>
+    dplyr::left_join(y = ICP_DC, by = join_by("HLEF_ID")) |> 
+    #dplyr::left_join(y = ICP_AO, by = join_by("HLEF_ID"), suffix = c("", "_AO")) |> 
+    dplyr::filter(!is.na(Fe_ppm)) |> 
+    dplyr::select(-ends_with("ppm"), -starts_with("extract"))
+HLEF_HFF_14C_AmmOx_df <- HLEF_HFF |> 
+    dplyr::left_join(y = CAMS_14C, by = join_by("HLEF_ID")) |>
+    #dplyr::left_join(y = ICP_DC, by = join_by("HLEF_ID")) |> 
+    dplyr::left_join(y = ICP_AO, by = join_by("HLEF_ID")) |> 
+    filter(!is.na(Fe_ppm)) |> 
+    dplyr::select(-ends_with("ppm"), -starts_with("extract"))
+HLEF_HFF_14C_DithCit_df
+HLEF_HFF_14C_AmmOx_df
+
+readr::write_csv(HLEF_HFF_14C_DithCit_df, here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv"))
+readr::write_csv(HLEF_HFF_14C_AmmOx_df, here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv"))
+
+
+HLEF_HFF_14C_DC_AO <- HLEF_HFF_14C_AmmOx_df |> 
+  dplyr::rename_with(~ str_replace(., "_mg_gSoil", "_mg_gSoil_AO"), 
+                     ends_with("_mg_gSoil")) |> 
+  dplyr::left_join(HLEF_HFF_14C_DithCit_df |> 
+                     dplyr::rename_with(~ str_replace(., "_mg_gSoil", "_mg_gSoil_DC"), 
+                     ends_with("_mg_gSoil")) |> 
+                     dplyr::select(HLEF_ID, ends_with("_mg_gSoil_DC")),
+                   by = join_by(HLEF_ID)
+                   ) |> 
+  dplyr::mutate(Al_AODC_ratio = Al_mg_gSoil_AO/Al_mg_gSoil_DC,
+                Fe_AODC_ratio = Fe_mg_gSoil_AO/Fe_mg_gSoil_DC,
+                delta_14C_adj = 1000+delta_14C)
+
+
+readr::write_csv(HLEF_HFF_14C_DC_AO, here("data/dataframes/HLEF_HFF_14C_DC_AO.csv"))
+
+```
+
+
+```{r}
+HLEF_HFF |> group_by(sample_ID) |> summarise(hpu = first(HPU)) |> group_by(hpu) |> summarise(n = n())
+
+
+```
+
+
+## End summary
+
+Should have: 
+1. A dataframe with `sample_ID` and `HPU` classes for all 84 samples (Organic and Mineral)
+2. A dataframe with basic lab data but no SCGSR data 
+3. A dataframe of TIC and TOC values for 50 mineral horizons
+4. A dataframe with heavy-fine fraction (HFF) for 50 mineral horizons
+5. A dataframe of Dithionate-citrate extract measurements for 50 mineral horizons
+6. A dataframe of Ammonium-oxalate extract measurements for 50 mineral horizons
+7. A dataframe of both DC and AO measurements with the 14C measurements combined 
+  - This was not combined earlier due to missing analysis
+  
+Analysis can be run on #7 dataframe
+
+```{r}
+read.csv(here("data/dataframes/HLEF_HPUonly.csv")) |> glimpse() #1
+read.csv(here("data/dataframes/HLEF_SOC_AllOrgMin.csv")) |> glimpse() #2
+read.csv(here("data/dataframes/HLEF_TOC_MineralSoils.csv")) |> glimpse() #3
+read.csv(here("data/dataframes/HLEF_HFF_SOConly.csv")) |> glimpse() #4
+read.csv(here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv")) |> glimpse() #5
+read.csv(here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")) |> glimpse() #6
+read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) |> glimpse() #7 
+```
+
+2. 
+
+```{r}
+
+```
+

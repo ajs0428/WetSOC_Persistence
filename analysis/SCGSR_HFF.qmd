@@ -1,0 +1,662 @@
+---
+title: "SCGSR Heavy SOC"
+format: 
+    html:
+        embed-resources: false
+---
+
+```{r setup, include=FALSE}
+library(formatR)
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", fig.show = "hold", time_it = TRUE, dpi = 100)
+knitr::opts_chunk$set(tidy.opts = list(width.cutoff = 60), tidy = T, collapse = TRUE, echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = '/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/')
+library(terra)
+library(lme4)
+library(MASS)
+library(lmerTest)
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(stats)
+library(ggcorrplot)
+library(RColorBrewer)
+library(webshot)
+library(kableExtra)
+library(formatR)
+library(stringr)
+library(data.table)
+library(openxlsx)
+
+
+#knitr::knit_hooks$set(webgl = hook_webgl)
+rgl::setupKnitr(autoprint = TRUE)
+
+terraOptions(
+    memfrac = 0.1
+)
+
+setGDALconfig("GDAL_PAM_ENABLED", "FALSE")
+
+theme_func <- function() {
+    theme(text = element_text(size = 16),
+          legend.position = 'right', 
+          legend.key.size = unit(0.6, "cm"),
+          legend.spacing.x = unit(1.2, "cm"),
+          panel.background = element_blank(),
+          panel.grid = element_blank(),
+          axis.ticks = element_line(colour = "grey60"),
+          axis.line = element_line(colour = "grey60"))
+}
+```
+
+
+Import lab excel datasheets 
+
+Data filtering for Heavy Fraction Fine (HFF):
+
+- filter for HFF data
+- add columns for HFF mgC/gSoil and silt+clay
+
+```{r}
+HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |>
+    mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
+                               .default = lag(depth_cm)), 
+            bottom = depth_cm, 
+            center = abs(top - (top - bottom)/2),
+            thick100 = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+                                    bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
+                                    bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
+                                    bottom > 100 & top > 100 ~ 0,
+                                    bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
+                                    bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
+                                    bottom == 100 ~ bottom - lag(bottom),
+                                    .default = 0),
+           SOC_hor_stock100 = 100*((carbon_perc/100)*BD_g_cm3*thick100*(1-(rock_perc/100))),
+           HFF_SOC_hor_stock_100 = 100*((HFF_percC/100)*BD_g_cm3*thick100*(1-(rock_perc/100))*((HFF_perc))))
+
+HLEF_HFF <- HLEF_Full |> filter(!is.na(HFF_percC)) |> 
+    mutate(HFF_mgC_gSoil = (HFF_percC/100)*(HFF/df_start_wt)*1000,
+           HFF_percC_of_soilC = ((HFF_percC/100)*HFF)/((carbon_perc/100)*df_start_wt),
+           siltclay = silt+clay) 
+
+readr::write_csv(HLEF_HFF, "SCGSR/data/dataframes/HlEF_HFF.csv")
+```
+
+
+```{r}
+ICP_DC <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 1, detectDates = TRUE) |> 
+    filter(Extract == "DithCit")
+ICP_AO <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 1, detectDates = TRUE) |> 
+    filter(Extract == "AmmOx")
+
+CAMS_14C <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/14C/14C_Dataframe.xlsx", sheet = 1) |> 
+    dplyr::rename("delta_14C" = "∆14C") |>
+    arrange(desc(HLEF_ID))
+
+HLEF_HFF_14C_ICP_df <- HLEF_HFF |> 
+    dplyr::left_join(y = CAMS_14C, by = join_by("HLEF_ID")) |>
+    dplyr::left_join(y = ICP_DC, by = join_by("HLEF_ID")) |> 
+    dplyr::left_join(y = ICP_AO, by = join_by("HLEF_ID"), suffix = c("", "_AO"))
+HLEF_HFF_14C_ICP_df
+```
+
+
+Append spatial data 
+
+```{r}
+#| eval: false
+HLEF_WIP <- 1-rast("HLEF/SEAK_WIP_9-10-2021_output.tif")
+plot(HLEF_WIP)
+HLEF_geo <- vect("HLEF/Geology/sim3340_shp/AKgeol_web_shp/AKStategeol_poly.shp") |>
+    project("EPSG:4326") |> 
+    terra::crop(ext(HLEF_WIP)) |> 
+    tidyterra::mutate(HLEF_LITH = as.factor(STATE_LA_1), 
+                      HLEF_LITH = case_when(str_detect(STATE_LA_1, "KJgn") ~ "Slate",
+                                       str_detect(STATE_LA_1, "Pzgn") ~ "Slate",
+                                       str_detect(STATE_LA_1, "KP") ~ "Phyllite",
+                                       str_detect(STATE_LA_1, "MzPzss") ~ "Tonalite",
+                                       str_detect(STATE_LA_1, "Qs") ~ "Quaternary",
+                                       str_detect(STATE_LA_1, "KJgv") ~ "Metavolcanic",
+                                       str_detect(STATE_LA_1, "MzPzsv") ~ "Metavolcanic",
+                                       str_detect(STATE_LA_1, "g") ~ "Glacier",
+                                       .default = STATE_LA_1)) |>
+    tidyterra::select(HLEF_LITH)
+
+writeVector(HLEF_geo, filename = "HLEF/Geology/HLEF_Lithology_classified.gpkg", overwrite = T)
+
+plot(HLEF_geo, "HLEF_LITH")
+plot(HLEF_WIP)
+```
+
+
+```{r}
+HLEF_WIP <- 1-rast("HLEF/SEAK_WIP_9-10-2021_output.tif")
+HLEF_geo <- vect("HLEF/Geology/HLEF_Lithology_classified.gpkg")
+HLEF_HFF_pts <- HLEF_HFF_14C_ICP_df |> vect(geom = c("lon", "lat")) |> 
+    terra::extract(x = HLEF_WIP, bind = TRUE) |> 
+    tidyterra::rename(WIP = SEAK_WIP_9.10.2021_output) 
+
+HLEF_geo_ext <- terra::extract(HLEF_HFF_pts, x = HLEF_geo)
+
+HLEF_HFF_14C_ICP_extdf <- HLEF_HFF_pts |> data.frame() |> 
+    cbind(HLEF_geo_ext$HLEF_LITH)  |>
+    dplyr::rename("HLEF_LITH" = "HLEF_geo_ext$HLEF_LITH") |> 
+    mutate(HLEF_LITH = case_when(is.na(HLEF_LITH) ~ "Quaternary",
+                           .default = HLEF_LITH),
+           sample_ID = as.factor(sample_ID)) |> 
+    filter(carbon_perc < 10) #|> 
+    # filter(SOC_hor_stock100 < 200) |> 
+    #filter(!str_detect(sample_ID, "FLO"))
+
+
+HLEF_HFF_14C_ICP_extdf$HLEF_LITH <- factor(HLEF_HFF_14C_ICP_extdf$HLEF_LITH)
+glimpse(HLEF_HFF_14C_ICP_extdf)
+
+#readr::write_csv(HLEF_HFF_14C_ICP_extdf, file = "HLEF/Dataframes/HLEF_HFF_14C_ICP_extdf.csv")
+
+```
+
+```{r}
+ggplot(HLEF_HFF_14C_ICP_extdf, aes(x = HLEF_LITH, y = carbon_perc)) + 
+    geom_violin(draw_quantiles = c(0.5)) + 
+    geom_jitter(width = 0.1) +
+    theme_func()
+```
+
+
+```{r}
+HLEF_HFF_pts_sum <- HLEF_HFF_14C_ICP_extdf |> data.frame() |>  
+    dplyr::group_by(sample_ID) |> 
+    dplyr::summarise(sum = sum(HFF_mgC_gSoil), wip = mean(WIP)) 
+
+hist(HLEF_HFF_pts_sum$wip, breaks = 20)
+
+
+HLEF_HFF_pts_sum |> group_by(sample_ID) |> summarise(wip = median(wip)) |> arrange(desc(wip))
+```
+
+### Bulk and MAOM SOC stocks 
+
+- by depths?
+
+```{r}
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    mutate(wetupl = case_when(WIP >= 0.50 ~ "wet",
+                              .default = "upl")) |>
+    group_by(wetupl) |>
+    summarise(meanTot = mean(SOC_hor_stock100),
+              meanMAOM = mean(HFF_SOC_hor_stock_100))
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = as.factor(WIP >=0.5), y = SOC_hor_stock100)) + 
+    geom_violin(draw_quantiles = c(0.5)) +
+    geom_jitter(width = 0.1) +
+    scale_x_discrete(name = c("Landscape Class\n WIP Threshold 50%"), 
+                     labels = c("Upland", "Wetland")) +
+    ylab(expression('Total SOC Stock (Mg ha'^-1*')')) +
+    theme_func()
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = as.factor(WIP >=0.5), y = HFF_SOC_hor_stock_100)) + 
+    geom_violin(draw_quantiles = c(0.5)) +
+    geom_jitter(width = 0.1) +
+   scale_x_discrete(name = c("Landscape Class\n WIP Threshold 50%"), 
+                     labels = c("Upland", "Wetland")) +
+    ylab(expression('MAOC Stock (Mg ha'^-1*')')) +
+    theme_func()
+```
+
+
+```{r}
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = HFF_mgC_gSoil, y = center, colour = WIP)) +
+    geom_point() +
+    scale_y_reverse() +
+    xlim(0, 20)+
+    xlab(expression('MAOC (mgC gSoil'^-1*')')) +
+    ylab(expression('Depth')) +
+    theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = Fe_ppm, y = HFF_mgC_gSoil)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 20, size = 5) +
+        ylab(expression('MAOC (mgC gSoil'^-1*')')) +
+        xlab(expression('Fe DithCit (ppm)')) +
+        theme_func()
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    filter(!is.na(Fe_ppm_AO)) |> 
+    ggplot(aes(x = Fe_ppm_AO, y = HFF_mgC_gSoil)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 20, size = 5) +
+        ylab(expression('MAOC (mgC gSoil'^-1*')')) +
+        xlab(expression('Fe AmmOx (ppm)')) +
+        theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = clay, y = HFF_mgC_gSoil)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 20, size = 5) +
+        ylab(expression('MAOC (mgC gSoil'^-1*')')) +
+        xlab(expression('Clay (%)')) +
+        theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = ph, y = HFF_mgC_gSoil)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 5, size = 5) +
+        ylab(expression('MAOC (mgC gSoil'^-1*')')) +
+        xlab(expression('pH')) +
+        theme_func()
+```
+
+Fe Drivers
+```{r}
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = clay, y = Fe_ppm)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 20, size = 5) +
+        ylab(expression('Fe DithCit (ppm)')) +
+        xlab(expression('Clay %')) +
+        theme_func()
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    filter(!is.na(Fe_ppm_AO)) |> 
+    ggplot(aes(x = clay, y = Fe_ppm_AO)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 20, size = 5) +
+        ylab(expression('Fe AmmOx (ppm)')) +
+        xlab(expression('Clay %')) +
+        theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(x = ph, y = Fe_ppm)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 4, size = 5) +
+        ylab(expression('Fe DithCit (ppm)')) +
+        xlab(expression('pH')) +
+        theme_func()
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    filter(!is.na(Fe_ppm_AO)) |> 
+    ggplot(aes(x = ph, y = Fe_ppm_AO)) +
+        geom_point() +
+        geom_smooth(method = "lm") +
+        ggpubr::stat_cor(method = "pearson", label.x = 4, size = 5) +
+        ylab(expression('Fe AmmOx (ppm)')) +
+        xlab(expression('pH')) +
+        theme_func()
+```
+
+
+```{r}
+
+
+HLEF_HFF_14C_ICP_extdf |> filter(SOC_hor_stock100 < 200) |> 
+    ggplot(aes(y = 100*(HFF_SOC_hor_stock_100/SOC_hor_stock100), 
+               x = WIP*100, fill = center)) +
+    geom_point(shape = 21, size =3.5) +
+    geom_smooth(aes(colour = NULL), method = "lm", fullrange = TRUE) + 
+    scale_fill_continuous(name = "Depth") +
+    scale_y_continuous(name = "MAOC Stock % of Total SOC Stock", 
+                       limits = c(0, 100)) + 
+    scale_x_continuous(name = "Wetland Probability %") +
+    ggpubr::stat_cor(method = "pearson", size = 5) +
+    #scale_x_continuous(limits = c(0.1, 0.9)) +
+    theme_func()
+
+```
+
+
+
+
+
+examine relationship between silt+clay and HFF HFF mgC/gSoil
+
+- ref: Georgiou et al 2022
+
+
+```{r}
+HLEF_HFF_Saturation <- HLEF_HFF_14C_ICP_extdf |> 
+    filter(HFF_percC_of_soilC < 1) |> 
+    mutate(WIP = as.numeric(as.character(WIP))) 
+```
+
+```{r}
+library(quantreg)
+
+HLEF_HFF_Saturation_scale <- HLEF_HFF_Saturation |> 
+    filter(Al_ppm < 800) |> 
+    filter(Si_ppm < 2700) |> 
+    mutate(across(
+        dplyr::where(is.numeric) & !all_of(c("SOC_hor_stock100", "HFF_percC",
+                                             "carbon_perc",
+                                             "HFF_mgC_gSoil", "HFF_SOC_hor_stock_100",
+                                             "HFF_percC_of_soilC", "delta_14C")),
+                  ~dplyr::case_when(TRUE ~ scale(.))))
+
+rfit <- rq(HFF_mgC_gSoil ~ siltclay +0, data = HLEF_HFF_Saturation,
+           tau = 0.9)
+rfit
+summary(rfit)
+
+lmfit <- lm(HFF_mgC_gSoil ~ siltclay, data = HLEF_HFF_Saturation)
+summary(lmfit)
+```
+
+
+```{r}
+
+
+
+ggplot(HLEF_HFF_Saturation, 
+           aes(x = siltclay, y = HFF_mgC_gSoil, fill = WIP*100)) +
+    geom_point( size = 3.5, shape = 21) + 
+    #geom_smooth( method = "lm", se = F, fullrange = TRUE, lty = 6) +
+    geom_abline(aes( slope = 0.86, 
+                     intercept = 0, 
+                     colour = "High"), 
+                lty = 3, size = 1, show.legend = NA, alpha = 0.7) +
+    geom_abline(aes(slope = 0.48, 
+                    intercept = 0, 
+                    colour = "Low"), 
+                lty = 3, size = 1, show.legend = NA) +
+    geom_abline(aes( slope = rfit$coefficients[[1]], 
+                     intercept = 0,#rfit$coefficients[[1]], 
+                     colour = "HLEF 90th"), 
+                lty = 5, size = 1.5, show.legend = NA) +
+    scale_fill_gradientn(colours = brewer.pal(9, "YlGnBu"),
+                         name = "Wetland \nProbability %", 
+                          n.breaks = 5, limits = c(0, 100)) +
+    scale_colour_manual(name = "Mineral Activity",
+                        #labels = c("High", "Low", "HLEF 90th"),
+                          values = c("orange2", "red2", "blue3")) +
+    scale_x_continuous(limits = c(0, 101), expand = c(0,0),
+                       name = "Silt + Clay %") +
+    scale_y_continuous(limits = c(0, 101), expand = c(0,0),
+                       name = "Observed MAOC mgC/gSoil") +
+    #ggpmisc::stat_poly_eq(ggpmisc::use_label(c("eq", "adj.R2", "P")), size = 4) +
+    ggpubr::stat_cor(method = "pearson", label.x = 15, size = 5) +
+    theme_func()
+```
+
+
+
+```{r}
+
+lmfit_lith <- lm(HFF_mgC_gSoil ~ siltclay+HLEF_LITH, data = HLEF_HFF_Saturation_scale)
+summary(lmfit_lith)
+
+
+ggplot(HLEF_HFF_Saturation, aes(x = siltclay, y = HFF_mgC_gSoil, fill = HLEF_LITH)) +
+    geom_point( size = 3.5, shape = 21) + 
+    geom_smooth(aes(colour = HLEF_LITH), method = "lm", se = F, fullrange = FALSE, show.legend = F) +
+    geom_abline(aes( slope = 0.86, 
+                     intercept = 0, 
+                     colour = "High"), 
+                lty = 3, size = 1, show.legend = NA, alpha = 0.7) +
+    geom_abline(aes(slope = 0.48, 
+                    intercept = 0, 
+                    colour = "Low"), 
+                lty = 3, size = 1, show.legend = NA) +
+    geom_abline(aes( slope = rfit$coefficients[[1]], 
+                     intercept = 0,#rfit$coefficients[[1]], 
+                     colour = "HLEF 90th"), 
+                lty = 5, size = 1.5, show.legend = NA) +
+    scale_fill_manual(name = "Mapped Lithology",
+                        #labels = c("Metavolcanic", "Quaternary", "Slate", "Tonalite"),
+                          values = c("Metavolcanic" = "steelblue", "Quaternary" = "brown", 
+                        "Slate" = "gray25", "Tonalite" = "purple3")) +
+    scale_colour_manual(name = "Mineral Activity",
+                        breaks = c( "High", "HLEF 90th", "Low"),
+                        labels = c( "High", "HLEF 90th", "Low"),
+                          values = c("High" = "orange2", "Low" = "blue3", "HLEF 90th" = "red",
+                        "Metavolcanic" = "steelblue", "Quaternary" = "brown", 
+                        "Slate" = "gray25", "Tonalite" = "purple3")) +
+    scale_x_continuous(limits = c(0, 101), expand = c(0,0),
+                       name = "Silt + Clay %") +
+    scale_y_continuous(limits = c(0, 101), expand = c(0,0),
+                       name = "Observed MAOC mgC/gSoil") +
+    annotate("label", x = 15, y = 90, fill = "white", label.size = 0,
+             label = paste0("R^{2}==", round(summary(lmfit_lith)$adj.r.squared, 3)), 
+             size = 5, parse = T, hjust = 0) +
+    annotate("label", x = 15, y = 80, fill = "white", label.size = 0,
+             size = 5, parse = T, hjust = 0,
+             label = "p < 0.05") +
+    guides(col = guide_legend(order = 1)) +
+    theme_func()
+```
+
+
+```{r}
+HLEF_HFF_Saturation_scale_select <- HLEF_HFF_Saturation_scale |> 
+    select(-ends_with(c("AO"),
+                        ignore.case = F)) |>
+    filter(WIP > (0.5-0.5469149)/0.137779) |>
+    na.omit()
+
+cor(HLEF_HFF_Saturation_scale_select$WIP, HLEF_HFF_Saturation_scale_select$Fe_ppm)
+
+hff_lmer <- lmer(log10(HFF_mgC_gSoil) ~ siltclay+depth_cm +
+                      Al_ppm +  Si_ppm + (1|sample_ID), 
+                 data = HLEF_HFF_Saturation_scale_select, REML = F)
+summary(hff_lmer)
+#plot(HLEF_HFF_Saturation_scale$HFF_mgC_gSoil ~ predict(hff_lmer, allow.new.levels = T))
+
+HLEF_HFF_14C_ICP_extdf |> data.frame() |> 
+    filter(HFF_percC_of_soilC < 1) |> 
+    ggplot(aes(x = WIP, y = HFF_mgC_gSoil, colour = siltclay)) +
+    geom_point( size = 3.5) + 
+    geom_smooth( method = "lm", se = F, fullrange = FALSE) +
+    scale_x_continuous(limits = c(0, 1), expand = c(0,0)) +
+    scale_y_continuous(limits = c(0, 45),expand = c(0,0)) +
+    #ggpmisc::stat_poly_eq(ggpmisc::use_label(c("eq", "adj.R2", "P")), size = 4) +
+    
+    theme(text = element_text(size = 14),
+          panel.background = element_blank(),
+            panel.grid.major = element_line(colour = "grey80"),
+          axis.ticks = element_blank())
+
+
+ggplot(aes(x = HFF_mgC_gSoil, y = 10**predict(hff_lmer, allow.new.levels = T), 
+           fill = Al_ppm), 
+       data = HLEF_HFF_Saturation_scale_select) +
+    geom_point( size = 3.5, shape = 21) + 
+    geom_abline(slope = 1, intercept = 0, colour = "black", lty = 2, size = 1) +
+    #geom_abline(slope = 0.48, intercept = 0, colour = "black", lty = 2, size = 1) +
+    scale_y_continuous(limits = c(0, 40), 
+                       expand = c(0,0), name = "Predicted HFF SOC mgC/gSoil") +
+    scale_x_continuous(limits = c(0, 40), 
+                       expand = c(0,0), name = "Observed HFF SOC mgC/gSoil") +
+    scale_fill_viridis_c(option = "mako", name = "Al ppm") +
+    ggpmisc::stat_poly_eq(ggpmisc::use_label(c("R2", "P")), size = 4) +
+    theme(text = element_text(size = 14),
+          panel.background = element_blank(),
+            panel.grid.major = element_line(colour = "grey80"),
+          axis.ticks = element_blank())
+```
+
+
+```{r}
+hff_14C_lmer <- lmer(delta_14C ~ depth_cm + HLEF_LITH +
+                      Fe_ppm + (1|sample_ID), 
+                 data = HLEF_HFF_Saturation_scale_select, REML = F)
+summary(hff_14C_lmer)
+
+r2_14C <- round(r.sq(y = HLEF_HFF_Saturation_scale_select$delta_14C, fitted(hff_14C_lmer)), 2)
+
+ggplot(aes(x = delta_14C, y = predict(hff_14C_lmer, allow.new.levels = T), 
+           fill = HLEF_LITH), 
+       data = HLEF_HFF_Saturation_scale_select) +
+    geom_point( size = 3.5, shape = 21) + 
+    geom_abline(slope = 1, intercept = 0, colour = "black", lty = 2, size = 1) +
+    #geom_abline(slope = 0.48, intercept = 0, colour = "black", lty = 2, size = 1) +
+    scale_y_continuous(#limits = c(0, 40), 
+                       name = "Predicted ∆14 C") +
+    scale_x_continuous(#limits = c(0, 40), 
+                       name = "Observed ∆14 C") +
+    scale_fill_viridis_d(option = "mako", name = "Lithology") +
+    #ggpmisc::stat_poly_eq(ggpmisc::use_label(c("R2", "P")),  size = 4) +
+    annotate(geom = "text", x = -600, y = -100,
+             label = as.expression(bquote(R^2 == .(r2_14C))))  +
+    theme(text = element_text(size = 14),
+          panel.background = element_blank(),
+            panel.grid.major = element_line(colour = "grey80"),
+          axis.ticks = element_blank())
+```
+
+
+
+
+Additional data from 
+- ICP-MS
+- CAMS 14C 
+
+```{r}
+
+
+HLEF_HFF_pts_mat <- HLEF_HFF_14C_ICP_extdf |> 
+    dplyr::select(-c(HFF, df_start_wt, df_wt, HF, HF_perc)) |>
+    filter(!is.na(Fe_ppm)) |> dplyr::select(where(is.numeric)) |> as.matrix()
+
+ggcorrplot(cor(HLEF_HFF_pts_mat), method = "square", type = "upper", lab = T, lab_size = 1.5)
+
+
+```
+
+```{r}
+cor_dat <- HLEF_HFF_14C_ICP_extdf |> 
+    dplyr::select(delta_14C, ph, siltclay, depth_cm, WIP) |>
+    #dplyr::left_join(ICP_DC, by = join_by("HLEF_ID")) |> 
+    filter(!is.na(delta_14C)) |> 
+    dplyr::select(where(is.numeric)) |> as.matrix()
+
+corplot <- ggcorrplot(cor(cor_dat), method = "square", type = "upper", lab = T, lab_size = 4.5)
+
+corplot
+```
+
+```{r}
+
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = 100*WIP, y = delta_14C, fill = center)) +
+    geom_point(size = 3, shape = 21) +
+    geom_smooth(method = "lm") +
+    scale_fill_gradientn(name = "Depth (cm)",
+                         colours = brewer.pal(9, "YlOrRd")) + 
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    xlab("Wetland Probability %") +
+    ggpubr::stat_cor(method = "pearson", size = 5) +
+    theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = center, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    scale_x_continuous(name = "Depth (cm)") +
+    ggpubr::stat_cor(method = "pearson", label.x = 25, size = 5) +
+    theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = clay, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    scale_x_continuous(name = "Silt+Clay (%)") +
+    ggpubr::stat_cor(method = "pearson", size = 5) +
+    theme_func()
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = ph, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    scale_x_continuous(name = "pH") +
+    ggpubr::stat_cor(method = "pearson", label.x = 3.35, size = 5) +
+    theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = ph, y = center)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+
+    scale_x_continuous(name = "pH") +
+    scale_y_reverse(name = "Depth (cm)") + 
+    ggpubr::stat_cor(method = "pearson", label.x = 6, size = 5) +
+    theme_func()
+```
+
+
+```{r}
+
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = Fe_ppm, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 300), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    ggpubr::stat_cor(method = "pearson", label.y = 200, size = 5) +
+    xlab("Fe DithCit (ppm)") + 
+    theme_func()
+HLEF_HFF_14C_ICP_extdf |> 
+    ggplot(aes(x = Al_ppm, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 300), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    ggpubr::stat_cor(method = "pearson", label.y = 200, size = 5) +
+    xlab("Al DithCit (ppm)") + 
+    theme_func()
+
+HLEF_HFF_14C_ICP_extdf |> filter(!is.na(Fe_ppm_AO)) |> 
+    ggplot(aes(x = Fe_ppm_AO/Fe_ppm, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    ggpubr::stat_cor(method = "pearson", label.x = .60, size = 5) +
+    xlab("Fe AmmOx/DithCit (ppm)") + 
+    theme_func()
+HLEF_HFF_14C_ICP_extdf |> filter(!is.na(Al_ppm_AO)) |> 
+    ggplot(aes(x = Al_ppm_AO/Al_ppm, y = delta_14C)) +
+    geom_point(size = 3) +
+    geom_smooth(method = "lm") +
+    scale_y_continuous(limits = c(-1000, 100), expand = c(0,0),
+                       name = expression(Delta^14*'C')) +
+    ggpubr::stat_cor(method = "pearson", label.x = .60, size = 5) +
+    xlab(" AmmOx/DithCit (ppm)") + 
+    theme_func()
+```
+
+```{r}
+hlef_wip_cor <- rast("HLEF/HLEF_WIP_9_10_2021_EPSG6783.tif")
+m <- c(0, 0.25, 1,
+       0.25, 0.5, 1,
+       0.5, 1, 1)
+rclmat <- matrix(m, ncol=3, byrow=TRUE)
+rc1 <- classify(hlef_wip_cor, rclmat, include.lowest=TRUE)
+
+rc1_poly <- terra::as.polygons(rc1, filename = "HLEF/HLEF_.gpkg")
+
+rc1_fill <- terra::fillHoles(rc1_poly)
+plot(rc1_fill)
+plot(rc1_poly)
+writeVector(rc1_fill, "HLEF/HLEF_Polygon_Filled.gpkg")
+
+HLEF_glacier <- HLEF_geo |> filter(HLEF_LITH == "Glacier")
+
+hlef_wip_cor <- rename(hlef_wip_cor, "WIP" = "HLEF_WIP_9_10_2021_EPSG6783")
+hlef_wip_cor_glac <- mask(hlef_wip_cor, mask = HLEF_glacier, inverse = TRUE,
+     filename = "HLEF/HLEF_WIP_glaciermask2.tif", overwrite = TRUE)
+
+
+```
+

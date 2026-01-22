@@ -2,8 +2,9 @@
 * 
 
 # Except
+!.gitignore
+!analysis/
 !analysis/*.R
 !analysis/*.qmd
 !WetSOC_Persistence.Rproj
-!.gitignore
 !README.md

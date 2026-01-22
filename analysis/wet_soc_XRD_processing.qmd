@@ -1,0 +1,146 @@
+---
+title: "wet_soc_XRD_processing"
+format: html
+---
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(formatR)
+library(openxlsx)
+library(here)
+library(rxylib)
+```
+
+
+
+### XRD Data 
+
+```{r}
+
+x <- read_xyData("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/XRD/Anthony XRD Data/114-46 xy-.xy")
+
+x$dataset[[1]][[1]]
+
+plot(x)
+```
+
+```{r}
+t <- (list.files("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/XRD/Anthony XRD Data",
+           full.names = TRUE))
+l <- lapply(t, read_xyData)
+
+d <- l[[1]]$dataset[[1]]$data_block
+
+extract_pattern <- function(filepath) {
+  # Get the filename (part after the last slash)
+  filename <- basename(filepath)
+  
+  # Extract the pattern before "xy"
+  pattern <- sub("^(.*?)\\s*xy.*$", "\\1", filename)
+  
+  # Return trimmed result
+  return(trimws(pattern))
+}
+
+xrd_todf <- function(dir_for_files){
+    t <- (list.files(dir_for_files,
+           full.names = TRUE))
+    df <- data.frame(inten = NA,
+                     angle = NA,
+                     location = NA)
+    l <- lapply(t, read_xyData)
+    
+    for(i in 1:length(t)){
+        d <- as.data.frame(l[[i]]$dataset[[1]]$data_block)
+        d <- d |> dplyr::rename("inten" = "V2",
+                                "angle" = "V1") |> 
+            dplyr::mutate(location = extract_pattern(t[[i]])) |>
+            dplyr::relocate(inten, angle, location)
+        g <- ggplot(d, aes(x = angle, y = inten)) +
+                geom_line() +
+                facet_wrap(~location, scales = "free") +
+            scale_y_continuous(limits = c(0, 600000), 
+                               labels = scales::number_format(accuracy = 100, big.mark = ",")) + 
+            expand_limits(x = 0, y = 0) +
+            theme(panel.background = element_blank(),
+                    panel.grid.major = element_line(colour = "grey20", linewidth = 0.2),
+                    axis.ticks = element_blank())
+        ggsave(g, dpi = 500, width = 6.5, height = 4, units = "in",
+               filename = paste0("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/XRD/plots/",
+                                 extract_pattern(t[[i]]), ".png"), device = "png")
+        df <- rbind(df, d)
+
+    }
+    return(na.omit(df))
+}
+```
+
+
+```{r}
+test_df <- xrd_todf("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/XRD/Anthony XRD Data")
+test_df_split <- test_df |> dplyr::mutate(location = as.factor(str_remove_all(location, "[^0-9-]")), 
+                                          loc_plot = as.factor(str_extract(location, "[^-]+")),
+                                          loc_depth = as.factor(str_remove_all(str_extract(location, 
+                                                                                           "(?<=-).*"), 
+                                                                               "[^0-9]"))) |> 
+    mutate(inten_const = case_when(
+        location == "118-52" ~ inten + 4E5,
+        location == "118-56" ~ inten + 8E5,
+        location == "118-100" ~ inten + 12E5,
+        location == "118-130" ~ inten + 16E5,
+        location == "127-131" ~ inten + 4E5,
+        location == "34-300" ~ inten + 4E5,
+        location == "37-61" ~ inten + 4E5,
+        location == "37-70" ~ inten + 8E5,
+        location == "37-290" ~ inten + 12E5,
+        location == "49-70" ~ inten + 4E5,
+        location == "49-156" ~ inten + 8E5,
+        location == "76-41" ~ inten + 4E5,
+        location == "76-65" ~ inten + 8E5,
+        location == "81-27" ~ inten + 4E5,
+        location == "81-45" ~ inten + 8E5,
+        location == "81-73" ~ inten + 12E5,
+        .default = inten
+        ))
+
+xrd_4 <- test_df_split |> dplyr::filter(loc_plot %in% unique(test_df_split$loc_plot)[6])
+ggplot(xrd_4, aes(x = angle, y = inten_const, colour = loc_depth)) +
+    geom_line(alpha = 0.7, linewidth = 0.2) +
+    facet_wrap(~loc_plot, scales = "free") +
+   scale_x_continuous(limits = c(2.5, 70), n.breaks = 20, 
+                           labels = scales::number_format(accuracy = .5, big.mark = ",")) +
+        scale_y_continuous(#limits = c(0, 100000), 
+                           labels = scales::number_format(accuracy = 100, big.mark = ","))
+
+for(i in 1:length(unique(test_df_split$loc_plot))){
+    xrd_chunk <- test_df_split |> dplyr::filter(loc_plot %in% unique(test_df_split$loc_plot)[i])
+    xrd_plot <- ggplot(xrd_chunk, aes(x = angle, y = inten_const, colour = loc_depth)) +
+        geom_line(alpha = 0.7, linewidth = 0.4) +
+        facet_wrap(~loc_plot, scales = "free") + 
+        scale_colour_manual(name = "Depth (cm)", 
+                              values  = c("#E69F00", "#56B4E9", "#009E73",  "#B554C2", "#DD5E00")) + 
+        scale_x_continuous(name = "Angle(˚)", limits = c(2.5, 70), n.breaks = 20, minor_breaks = waiver(), 
+                           labels = scales::number_format(accuracy = .5, big.mark = ",")) +
+        scale_y_continuous(name = "Intensity Adjusted",
+                           labels = scales::number_format(accuracy = 100, big.mark = ",")) +
+        theme(text = element_text(size = 10),
+                legend.position = 'right', 
+                legend.key.size = unit(0.6, "cm"),
+                legend.spacing.x = unit(1.2, "cm"),
+                legend.text = element_text(size = rel(0.70), hjust = 0.5),
+                panel.background = element_blank(),
+                panel.grid.major = element_line(colour = "grey50", linewidth = 0.1),
+                axis.ticks = element_blank(),
+                axis.text = element_text(size = rel(0.5)),
+                axis.title = element_text(size = rel(1)))
+     ggsave(xrd_plot, dpi = 500, width = 6.5, height = 4, units = "in",
+               filename = paste0("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/XRD/plots/grouped_plots/grouped_",
+                                 unique(test_df_split$loc_plot)[i], "_plot.png"), device = "png")
+}
+
+
+
+```
+
