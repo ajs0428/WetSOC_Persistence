@@ -222,6 +222,31 @@ HLEF_HFF |> group_by(sample_ID) |> summarise(hpu = first(HPU)) |> group_by(hpu) 
 ```
 
 
+```{r}
+HLEF_SOC_stock <- HLEF_SOC_All |> 
+    dplyr::group_by(sample_ID) |> 
+    summarise(sample_ID = first(sample_ID),
+              SOC_stock = sum(SOC_hor_stock))
+readr::write_csv(HLEF_SOC_stock, file = here("data/dataframes/HLEF_totSOCstock.csv"))
+
+HLEF_HFF_stock <- HLEF_HFF |>
+    dplyr::group_by(sample_ID) |> 
+    summarise(sample_ID = first(sample_ID),
+              HFF_Stock = sum(HFF_SOC_hor_stock))
+# readr::write_csv(HLEF_HFF_stock, file = "WetSOC_Persistence/data/dataframes/HLEF_HFFstock.csv")
+
+HLEF_stock_cmb <- HLEF_SOC_stock |> 
+    dplyr::left_join(HLEF_HFF_stock, by = join_by(sample_ID)) |> 
+    dplyr::left_join(HLEF_HPU, by = join_by(sample_ID)) |> 
+    dplyr::mutate(HFF_Stock = case_when(is.na(HFF_Stock) ~ 0,
+                                 .default = HFF_Stock),
+                  HFF_SOC_ratio = HFF_Stock/SOC_stock)
+
+# readr::write_csv(HLEF_stock_cmb, file = "WetSOC_Persistence/data/dataframes/HLEF_HFFtotSOCstock_combined.csv")
+
+```
+
+
 ## End summary
 
 Should have: 

@@ -6,26 +6,20 @@ format: html
 ```{r}
 #| label: setup
 
-library(formatR)
-library(terra)
+library(tidyverse)
 library(lme4)
 library(car)
 library(MASS)
 library(lmerTest)
 library(emmeans)
-library(tidyverse)
-library(sf)
-library(ggplot2)
-library(stats)
 library(ppcor)
 library(ggcorrplot)
 library(RColorBrewer)
 library(webshot)
 library(kableExtra)
 library(formatR)
-library(stringr)
-library(data.table)
 library(openxlsx)
+library(here)
 
 knitr::opts_chunk$set(fig.align = "center", fig.show = "hold", dpi = 100,
                       tidy.opts = list(width.cutoff = 60), 
@@ -70,95 +64,77 @@ check_assump_func <- function(model) {
 
 data import 
 ```{r}
-HLEF_HPU <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION") |> 
-    dplyr::select(sample_name, HPU) |> 
-    dplyr::rename(sample_ID = sample_name)
-readr::write_csv(HLEF_HPU, "WetSOC_Persistence/data/dataframes/HLEF_HPUonly.csv")
-HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |> 
-    dplyr::select(c(1:14)) |>
-    dplyr::mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
-                                  (depth_cm - lag(depth_cm)) < 0 ~ 0, 
-                               .default = lag(depth_cm)), 
-            bottom = depth_cm, 
-            #center = abs(top - (top - bottom)/2),
-            thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
-                              (bottom-top) < 0 ~ bottom,
-                                    #bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
-                                    #bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
-                                    #bottom > 100 & top > 100 ~ 0,
-                                    #bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
-                                    #bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
-                                    #bottom == 100 ~ bottom - lag(bottom),
-                                    .default = bottom-top),
-           SOC_hor_stock = 100*((carbon_perc/100)*BD_g_cm3*thick*(1-(rock_perc/100))))
-readr::write_csv(HLEF_SOC_All, "WetSOC_Persistence/data/dataframes/HLEF_SOC_AllOrgMin.csv")
-
-HLEF_HFF <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/WetSOC_Persistence/data/dataframes/HLEF_HFF_SOConly.csv") |> 
-    mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
-           CN = carbon_perc/nitrogen_perc)
-
-target_maom <- c("HFF_mgC_gSoil")
-HLEF_HFF_trans <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/WetSOC_Persistence/data/dataframes/HLEF_HFF_SOConly.csv") |> 
-    mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
-           CN = carbon_perc/nitrogen_perc,
-           across( where(is.numeric) & !all_of(target_maom), ~ case_when(TRUE ~ scale(.))))
- 
-
-HLEF_HFF_14C_DithCit_df <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DithCit_df.csv") 
- 
-HLEF_HFF_14C_AmmOx_df <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")
-
-target_maom14C <- c("HFF_mgC_gSoil", "delta_14C", "delta_14C_adj")
-HLEF_HFF_14C_DithCit_transdf <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DithCit_df.csv") |> 
-    mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
-           CN = carbon_perc/nitrogen_perc,
-           delta_14C_adj = 1000+delta_14C,
-           across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
- 
-HLEF_HFF_14C_AmmOx_transdf <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_AmmOx_df.csv") |> 
-    mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
-           CN = carbon_perc/nitrogen_perc,
-           delta_14C_adj = 1000+delta_14C,
-           across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
-
-HLEF_HFF_14C_DC_AO <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DC_AO.csv")
-
-HLEF_HFF_14C_DC_AO_trans <- HLEF_HFF_14C_DC_AO |>
-  dplyr::mutate(across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
-
-write.csv(HLEF_HFF_14C_DC_AO_trans, "WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DC_AO_trans.csv")
+HLEF_HPU <- read.csv(here("data/dataframes/HLEF_HPUonly.csv")) #|> glimpse() #1
+HLEF_SOC_All <- read.csv(here("data/dataframes/HLEF_SOC_AllOrgMin.csv")) #|> glimpse() #2
+HLEF_TOC <- read.csv(here("data/dataframes/HLEF_TOC_MineralSoils.csv")) #|> glimpse() #3
+HLEF_HFF <- read.csv(here("data/dataframes/HLEF_HFF_SOConly.csv")) #|> glimpse() #4
+HLEF_HFF_14C_DithCit_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv")) #|> glimpse() #5
+HLEF_HFF_14C_AmmOx_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")) # |> glimpse() #6
+HLEF_HFF_14C_DC_AO_trans <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) #|> glimpse() #7 
 ```
 
-What are the overall SOC stocks including both mineral and organic soils for landscape classes and are they different?
+
 
 ```{r}
-HLEF_SOC_stock <- HLEF_SOC_All |> 
-    dplyr::group_by(sample_ID) |> 
-    summarise(sample_ID = first(sample_ID),
-              SOC_stock = sum(SOC_hor_stock))
-readr::write_csv(HLEF_SOC_stock, file = "WetSOC_Persistence/data/dataframes/HLEF_totSOCstock.csv")
-
-HLEF_HFF_stock <- HLEF_HFF |>
-    dplyr::group_by(sample_ID) |> 
-    summarise(sample_ID = first(sample_ID),
-              HFF_Stock = sum(HFF_SOC_hor_stock))
-readr::write_csv(HLEF_HFF_stock, file = "WetSOC_Persistence/data/dataframes/HLEF_HFFstock.csv")
-
-HLEF_stock_cmb <- HLEF_SOC_stock |> 
-    dplyr::left_join(HLEF_HFF_stock, by = join_by(sample_ID)) |> 
-    dplyr::left_join(HLEF_HPU, by = join_by(sample_ID)) |> 
-    dplyr::mutate(HFF_Stock = case_when(is.na(HFF_Stock) ~ 0,
-                                 .default = HFF_Stock),
-                  HFF_SOC_ratio = HFF_Stock/SOC_stock)
-
-readr::write_csv(HLEF_stock_cmb, file = "WetSOC_Persistence/data/dataframes/HLEF_HFFtotSOCstock_combined.csv")
-
-
-HFF_SOC_ratio_lm <- lm(log(HFF_SOC_ratio+1) ~ HPU, data = HLEF_stock_cmb)
-
-emmeans(HFF_SOC_ratio_lm, specs = pairwise ~ HPU)
-
+# HLEF_HPU <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION") |> 
+#     dplyr::select(sample_name, HPU) |> 
+#     dplyr::rename(sample_ID = sample_name)
+# readr::write_csv(HLEF_HPU, "WetSOC_Persistence/data/dataframes/HLEF_HPUonly.csv")
+# HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |> 
+#     dplyr::select(c(1:14)) |>
+#     dplyr::mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
+#                                   (depth_cm - lag(depth_cm)) < 0 ~ 0, 
+#                                .default = lag(depth_cm)), 
+#             bottom = depth_cm, 
+#             #center = abs(top - (top - bottom)/2),
+#             thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+#                               (bottom-top) < 0 ~ bottom,
+#                                     #bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
+#                                     #bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
+#                                     #bottom > 100 & top > 100 ~ 0,
+#                                     #bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
+#                                     #bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
+#                                     #bottom == 100 ~ bottom - lag(bottom),
+#                                     .default = bottom-top),
+#            SOC_hor_stock = 100*((carbon_perc/100)*BD_g_cm3*thick*(1-(rock_perc/100))))
+# readr::write_csv(HLEF_SOC_All, "WetSOC_Persistence/data/dataframes/HLEF_SOC_AllOrgMin.csv")
+# 
+# HLEF_HFF <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/WetSOC_Persistence/data/dataframes/HLEF_HFF_SOConly.csv") |> 
+#     mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
+#            CN = carbon_perc/nitrogen_perc)
+# 
+# target_maom <- c("HFF_mgC_gSoil")
+# HLEF_HFF_trans <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/WetSOC_Persistence/data/dataframes/HLEF_HFF_SOConly.csv") |> 
+#     mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
+#            CN = carbon_perc/nitrogen_perc,
+#            across( where(is.numeric) & !all_of(target_maom), ~ case_when(TRUE ~ scale(.))))
+#  
+# 
+# HLEF_HFF_14C_DithCit_df <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DithCit_df.csv") 
+#  
+# HLEF_HFF_14C_AmmOx_df <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")
+# 
+# target_maom14C <- c("HFF_mgC_gSoil", "delta_14C", "delta_14C_adj")
+# HLEF_HFF_14C_DithCit_transdf <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DithCit_df.csv") |> 
+#     mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
+#            CN = carbon_perc/nitrogen_perc,
+#            delta_14C_adj = 1000+delta_14C,
+#            across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
+#  
+# HLEF_HFF_14C_AmmOx_transdf <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_AmmOx_df.csv") |> 
+#     mutate(HFF_SOC_ratio = HFF_SOC_hor_stock/SOC_hor_stock,
+#            CN = carbon_perc/nitrogen_perc,
+#            delta_14C_adj = 1000+delta_14C,
+#            across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
+# 
+# HLEF_HFF_14C_DC_AO <- read.csv("WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DC_AO.csv")
+# 
+# HLEF_HFF_14C_DC_AO_trans <- HLEF_HFF_14C_DC_AO |>
+#   dplyr::mutate(across( where(is.numeric) & !all_of(target_maom14C), ~ case_when(TRUE ~ scale(.))))
+# 
+# write.csv(HLEF_HFF_14C_DC_AO_trans, "WetSOC_Persistence/data/dataframes/HLEF_HFF_14C_DC_AO_trans.csv")
 ```
+
 
 
 ### Bulk soil measurements 
@@ -247,21 +223,21 @@ emDepth$contrasts
 ```{r}
 print("***************FeDC****************")
 lm_FeDC <- glmer((Fe_mg_gSoil_DC) ~ HPU + (1|sample_ID), 
-                 data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"), 
+                 data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"), 
                  control = glmerControl(optimizer = "nloptwrap"))
 check_assump_func(lm_FeDC)
 Anova(lm_FeDC)
 emFeDC <- emmeans(lm_FeDC, specs = pairwise ~ HPU, adjust = "tukey")
 emFeDC$contrasts
 print("***************FeAO***************")
-lm_FeAO <- glmer((Fe_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
+lm_FeAO <- glmer((Fe_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 check_assump_func(lm_FeAO)
 Anova(lm_FeAO)
 emFeAO <- emmeans(lm_FeAO, specs = pairwise ~ HPU, adjust = "tukey")
 emFeAO$contrasts
 print("***************FeAODC***************")
 lm_FeAODC <- glmer((Fe_AODC_ratio) ~ HPU + (1|sample_ID), 
-                       data = HLEF_HFF_14C_DC_AO, 
+                       data = HLEF_HFF_14C_DC_AO_trans, 
                        family = Gamma(link = "log"), 
                    control = glmerControl(optimizer = "nloptwrap"))
 check_assump_func(lm_FeAODC)
@@ -270,20 +246,20 @@ em_FeAODC <- emmeans(lm_FeAODC, specs = pairwise ~ HPU, adjust = "tukey")
 em_FeAODC$contrasts
 
 print("***************AlDC***************")
-lm_AlDC <- glmer((Al_mg_gSoil_DC) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
+lm_AlDC <- glmer((Al_mg_gSoil_DC) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 check_assump_func(lm_AlDC)
 Anova(lm_AlDC)
 emAlDC <- emmeans(lm_AlDC, specs = pairwise ~ HPU, adjust = "tukey")
 emAlDC$contrasts
 print("***************AlAO***************")
-lm_AlAO <- glmer((Al_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
+lm_AlAO <- glmer((Al_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 check_assump_func(lm_AlAO)
 Anova(lm_AlAO)
 emAlAO <- emmeans(lm_AlAO, specs = pairwise ~ HPU, adjust = "tukey")
 emAlAO$contrasts
 print("***************AlAODC***************")
 lm_AlAODC <- glmer((Al_AODC_ratio) ~ HPU + (1|sample_ID), 
-                       data = HLEF_HFF_14C_DC_AO, 
+                       data = HLEF_HFF_14C_DC_AO_trans, 
                        family = Gamma(link = "log"), 
                    control = glmerControl(optimizer = "optimx", 
                                       optCtrl = list(method = "L-BFGS-B")))
@@ -330,7 +306,7 @@ emm_maoc
 
 ```{r}
 
-maoc_depthHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_cm +(1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+maoc_depthHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_cm +(1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 summary(maoc_depthHPU_lm)
 Anova(maoc_depthHPU_lm)
 emm_maoc_depthHPU_lm <- emtrends(maoc_depthHPU_lm, specs = pairwise ~ HPU, var = "depth_cm",
@@ -343,7 +319,7 @@ emmip(maoc_depthHPU_lm, HPU~depth_cm, cov.reduce = range)
 MAOM-C content with SOC  content
 
 ```{r}
-maoc_soc <- glmer((HFF_mgC_gSoil) ~ SOC_mgC_gSoil +(1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+maoc_soc <- glmer((HFF_mgC_gSoil) ~ SOC_mgC_gSoil +(1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 summary(maoc_soc)
 
 HLEF_HFF_maom_soc <- HLEF_HFF |> 
@@ -360,7 +336,7 @@ ggplot(data = HLEF_HFF_maom_soc) +
 MAOM-C content(mg/g) correlations with Bulk Soil properties
 
 ```{r}
-HLEF_cor <- round(cor(HLEF_HFF_trans |> dplyr::select(HFF_mgC_gSoil, depth_cm, carbon_perc,
+HLEF_cor <- round(cor(HLEF_HFF_14C_DC_AO_trans |> dplyr::select(HFF_mgC_gSoil, depth_cm, carbon_perc,
                                                 TOC, nitrogen_perc, clay, siltclay, ph) ), 1)
 HLEF_cor_pmat <- cor_pmat(HLEF_cor)
 
@@ -372,38 +348,38 @@ ggcorrplot(HLEF_cor, type = "lower", p.mat = HLEF_cor_pmat,
 ### MAOM-C Bulk Soil modeling
 
 ```{r}
-lmC_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + (1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+lmC_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 summary(lmC_MAOM)
 Anova(lmC_MAOM, type = 3)
 
-# lmTOC_MAOM <- glmer((HFF_mgC_gSoil) ~ TOC + (1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+# lmTOC_MAOM <- glmer((HFF_mgC_gSoil) ~ TOC + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 # summary(lmTOC_MAOM)
 # Anova(lmTOC_MAOM, type = 3)
 
-# lmN_MAOM <- glmer((HFF_mgC_gSoil) ~ bulkCN + (1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+# lmN_MAOM <- glmer((HFF_mgC_gSoil) ~ bulkCN + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 # Anova(lmN_MAOM, type = 3)
 
 lmClay_MAOM <- glmer((HFF_mgC_gSoil) ~ clay + (1|sample_ID), 
-                     data = HLEF_HFF_trans, 
+                     data = HLEF_HFF_14C_DC_AO_trans, 
                      family = Gamma(link = "log"),
                      control = glmerControl(optimizer = "nloptwrap"))
 summary(lmClay_MAOM)
 Anova(lmClay_MAOM, type = 3)
 
-# lmSiltClay_MAOM <- glmer((HFF_mgC_gSoil) ~ siltclay + (1|sample_ID), data = HLEF_HFF_trans, family = Gamma(link = "log"))
+# lmSiltClay_MAOM <- glmer((HFF_mgC_gSoil) ~ siltclay + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
 # Anova(lmSiltClay_MAOM, type = 3)
 
-lmpH_MAOM <- glmer((HFF_mgC_gSoil) ~ ph + (1|sample_ID), data = HLEF_HFF_trans, 
+lmpH_MAOM <- glmer((HFF_mgC_gSoil) ~ ph + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, 
                    family = Gamma(link = "log"))
 summary(lmpH_MAOM)
 Anova(lmpH_MAOM, type = 3)
 
 lmbulk_MAOM_HPU <- glmer((HFF_mgC_gSoil) ~ carbon_perc + clay + ph + HPU + (1|sample_ID), 
-                     data = HLEF_HFF_trans, 
+                     data = HLEF_HFF_14C_DC_AO_trans, 
                      family = Gamma(link = "log"),
                      control = glmerControl(optimizer = "nloptwrap"))
 lmbulk_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + clay + ph + (1|sample_ID), 
-                     data = HLEF_HFF_trans, 
+                     data = HLEF_HFF_14C_DC_AO_trans, 
                      family = Gamma(link = "log"),
                      control = glmerControl(optimizer = "nloptwrap"))
 summary(lmbulk_MAOM)
@@ -486,13 +462,14 @@ Anova(lmAlAODC_MAOM)
 - Need to log transform still to match models
 
 ```{r}
-HLEF_HFF_ppcor <- HLEF_HFF_14C_DC_AO |> 
+HLEF_HFF_ppcor <- HLEF_HFF_14C_DC_AO_trans |> 
   dplyr::mutate(poorAll = Fe_mg_gSoil_AO + Al_mg_gSoil_DC) |> 
   dplyr::select(HFF_mgC_gSoil, delta_14C, depth_cm, carbon_perc, clay, ph,
                 Fe_mg_gSoil_DC, Al_mg_gSoil_DC, Fe_mg_gSoil_AO, Al_mg_gSoil_AO)
 
 pcor(HLEF_HFF_ppcor)$estimate |> 
-  ggcorrplot::ggcorrplot(lab = TRUE, lab_size = 2, p.mat = pcor(HLEF_HFF_ppcor)$p.value, )
+  ggcorrplot::ggcorrplot(lab = TRUE, lab_size = 2, 
+                         p.mat = pcor(HLEF_HFF_ppcor)$p.value, type = "upper")
 ```
 
 
@@ -659,7 +636,7 @@ Is there a difference in the ∆14C between HPUs?
 ```{r}
 
 maoc_14C_lm <- lmer((delta_14C_adj) ~ HPU + (1|sample_ID),
-                     data = HLEF_HFF_14C_DithCit_transdf)
+                     data = HLEF_HFF_14C_DC_AO_trans)
 check_assump_func(maoc_14C_lm)
 summary(maoc_14C_lm)
 Anova(maoc_14C_lm)
@@ -698,9 +675,9 @@ Anova(lmClay_MAOM_14C)
 # lmSiltClay_MAOM_14C <- glmer((delta_14C_adj) ~ siltclay + (1|sample_ID), data = HLEF_HFF_14C_DithCit_transdf, family = gaussian(link = "identity"))
 # Anova(lmSiltClay_MAOM_14C)
 
-lmpH_MAOM_14C <- lmer((delta_14C_adj) ~ ph + (1|sample_ID), data = HLEF_HFF_14C_DithCit_transdf)
+lmpH_MAOM_14C <- lmer((delta_14C_adj) ~ ph + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
 summary(lmpH_MAOM_14C)
-check_assump_func(lmDepth_MAOM_14C)
+check_assump_func(lmpH_MAOM_14C)
 Anova(lmpH_MAOM_14C)
 
 lmDepth_MAOM_14C <- lmer((delta_14C_adj) ~ depth_cm + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
@@ -855,7 +832,7 @@ Anova(maoc_drv_lm2)
 car::Anova(maoc_drv_lm, type = "III")
 #emmeans(maoc_drv_lm, pairwise ~ HPU)
 rsq::rsq.glmm(maoc_drv_lm)
-r.sq(y = HLEF_HFF_14C_DithCit_transdf$HFF_mgC_gSoil,
+r.sq(y = HLEF_HFF_14C_DC_AO_trans$HFF_mgC_gSoil,
      y.fitted = (fitted(maoc_drv_lm)))
 
 saveRDS(maoc_drv_lm, "WetSOC_Persistence/analysis/models/maoc_drv_lm.rds")
@@ -865,7 +842,7 @@ saveRDS(maoc_drv_lm, "WetSOC_Persistence/analysis/models/maoc_drv_lm.rds")
 ### MAOM-C vs. MAOM-∆14C
 
 ```{r}
-HLEF_HFF_14C_DC_AO_ratio <- HLEF_HFF_14C_DC_AO |> mutate(SOC_MAOM_content_ratio = HFF_mgC_gSoil/SOC_mgC_gSoil) 
+HLEF_HFF_14C_DC_AO_ratio <- HLEF_HFF_14C_DC_AO_trans |> mutate(SOC_MAOM_content_ratio = HFF_mgC_gSoil/SOC_mgC_gSoil) 
   #filter(SOC_MAOM_content_ratio < 1) |> 
 
 lm_MAOM_MAOM14C <- lmer((delta_14C_adj) ~ HFF_mgC_gSoil + 
@@ -899,11 +876,11 @@ Anova(lm_MAOMratio_MAOM14C, type = 3)
 
 ```{r}
 
-maoc_14C_drv_lm <- glmer((delta_14C_adj) ~ HPU+clay*depth_cm*Al_mg_gSoil+carbon_perc + (1|sample_ID), 
-                        data = HLEF_HFF_14C_DithCit_transdf,
+maoc_14C_drv_lm <- glmer((delta_14C_adj) ~ HPU+clay*depth_cm*Al_mg_gSoil_DC+carbon_perc + (1|sample_ID), 
+                        data = HLEF_HFF_14C_DC_AO_trans,
                         family = gaussian(link = "identity"))
-maoc_14C_drv_lm2 <- glmer((delta_14C_adj) ~  HPU*depth_cm*Al_mg_gSoil+clay+carbon_perc + (1|sample_ID), 
-                        data = HLEF_HFF_14C_DithCit_transdf,
+maoc_14C_drv_lm2 <- glmer((delta_14C_adj) ~  HPU*depth_cm*Al_mg_gSoil_DC+clay+carbon_perc + (1|sample_ID), 
+                        data = HLEF_HFF_14C_DC_AO_trans,
                         family = gaussian(link = "identity"))
 anova(maoc_14C_drv_lm, maoc_14C_drv_lm2)
 summary(maoc_14C_drv_lm)
@@ -914,7 +891,7 @@ Anova(maoc_14C_drv_lm2)
 car::Anova(maoc_14C_drv_lm2, type = "III")
 #emmeans(maoc_14C_drv_lm, pairwise ~ HPU)
 rsq::rsq.glmm(maoc_14C_drv_lm2)
-r.sq(y = HLEF_HFF_14C_DithCit_transdf$delta_14C_adj,
+r.sq(y = HLEF_HFF_14C_DC_AO_trans$delta_14C_adj,
      y.fitted = (fitted(maoc_14C_drv_lm2)))
 
 saveRDS(maoc_14C_drv_lm2, "WetSOC_Persistence/analysis/models/maoc_14C_drv_lm.rds")
