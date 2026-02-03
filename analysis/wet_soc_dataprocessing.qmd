@@ -7,7 +7,11 @@ format:
 
 ```{r}
 #| label: setup
-library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(stringr)
 library(formatR)
 library(openxlsx)
 library(here)
@@ -24,18 +28,23 @@ rgl::setupKnitr(autoprint = TRUE)
 here::here()
 ```
 
-## Import lab excel datasheets from local drive on computer
+## Import lab excel datasheets from local private drive on computer
+
+- HLEF2022LAB.xlsx is a excel workbook with sheets for
+  - LOCATION: lat, lon, HPU, landforms
+  - HLEF_FullData: soil depth, BD, rocks, carbon, cn, pH, texture, heavy fractions
+  
 
 ```{r}
 
-HLEF_HPU <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION") |> 
+HLEF_HPU <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION") |> 
   dplyr::select(sample_name, HPU) |> 
   dplyr::rename(sample_ID = sample_name)
 
 readr::write_csv(HLEF_HPU, here("data/dataframes/HLEF_HPUonly.csv"))
 
-
-HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |> 
+# Just soil carbon stocks
+HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |> 
   dplyr::select(c(1:14)) |>
   dplyr::mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
                                 (depth_cm - lag(depth_cm)) < 0 ~ 0, 
@@ -44,6 +53,7 @@ HLEF_SOC_All <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of 
                 #center = abs(top - (top - bottom)/2),
                 thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
                                   (bottom-top) < 0 ~ bottom,
+                                  ### uncomment this code to calculate metrics for 100cm only
                                   #bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
                                   #bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
                                   #bottom > 100 & top > 100 ~ 0,
@@ -59,9 +69,12 @@ readr::write_csv(HLEF_SOC_All, here("data/dataframes/HLEF_SOC_AllOrgMin.csv"))
 
 ### Water Extractable Organic Carbon
 
+TOC data are in two .csv files: Anthony_Batch1_010224.csv & Anthony_Batch2_010324.csv
+  - A name file helps connect lab IDs: HLEF_TOC_NumName.csv
+
 ```{r}
-toc_batch1 <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/TOC/Anthony_Batch1_010224.csv")
-toc_batch2 <- read.csv("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/TOC/Anthony_Batch2_010324.csv")
+toc_batch1 <- read.csv("/Users/Anthony/Documents/Lab Work/SCGSR/data/TOC/Anthony_Batch1_010224.csv")
+toc_batch2 <- read.csv("/Users/Anthony/Documents/Lab Work/SCGSR/data/TOC/Anthony_Batch2_010324.csv")
 numName <- read.csv(here("data/dataframes/HLEF_TOC_NumName.csv")) |> mutate(Num = as.character(Num))
 glimpse(toc_batch1)
 
@@ -87,6 +100,8 @@ toc_all <- rbind(toc_batch1_form, toc_batch2_form) |>
     dplyr::relocate(Name, Num, TIC, TOC) |> 
     filter(Name != "Blank")
 
+glimpse(toc_all)
+
 readr::write_csv(toc_all, here("data/dataframes/HLEF_TOC_MineralSoils.csv"))
 
 ```
@@ -94,11 +109,12 @@ readr::write_csv(toc_all, here("data/dataframes/HLEF_TOC_MineralSoils.csv"))
 
 ### Data filtering for Heavy Fraction Fine (HFF):
 
+From HLEF2022LAB.xlsx - HLEF_FullData
 - filter for HFF data
 - add columns for HFF mgC/gSoil and silt+clay
 
 ```{r}
-HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |>
+HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |>
     mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
                                .default = lag(depth_cm)), 
             bottom = depth_cm, 
@@ -123,9 +139,10 @@ HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Was
            #name_short = paste0(str_sub(sample_ID, start = 1L, end = 3L))
            )
 
-HLEF_loc <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION", detectDates = TRUE) |> 
+HLEF_loc <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION", detectDates = TRUE) |> 
     filter(sample_name != "PRE-2022")
 
+#
 l_n <- lm((nitrogen_perc) ~ carbon_perc + 0, data = HLEF_Full |> filter(nitrogen_perc >0) |> na.omit())
 p_n <- predict(l_n, data.frame(carbon_perc = HLEF_Full[HLEF_Full$nitrogen_perc == 0, "carbon_perc"][1]))
 
@@ -155,17 +172,18 @@ readr::write_csv(HLEF_HFF, here("data/dataframes/HLEF_HFF_SOConly.csv"))
 ```
 
 
+
 ```{r}
 target_maom14C <- c("HFF_mgC_gSoil", "delta_14C", "delta_14C_adj")
 
-ICP_DC <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
+ICP_DC <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
     filter(Extract == "DithCit") |> 
     mutate(Al_mg_gSoil = (Al_ppm*(extract_vol_ml/1000))/(weight_g),
            Fe_mg_gSoil = (Fe_ppm*(extract_vol_ml/1000))/(weight_g),
            Si_mg_gSoil = (Si_ppm*(extract_vol_ml/1000))/(weight_g),
            Ca_mg_gSoil = (Ca_ppm*(extract_vol_ml/1000))/(weight_g),
            Mn_mg_gSoil = (Mn_ppm*(extract_vol_ml/1000))/(weight_g))
-ICP_AO <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
+ICP_AO <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/SCGSR/data/ICP_MS/LLNL_HLEF_Extracts_ICP_MS.xlsx", sheet = 3, detectDates = TRUE) |> 
     filter(Extract == "AmmOx")  |> 
     mutate(Al_mg_gSoil = (Al_ppm*(extract_vol_ml/1000))/(weight_g),
            Fe_mg_gSoil = (Fe_ppm*(extract_vol_ml/1000))/(weight_g),
@@ -173,7 +191,7 @@ ICP_AO <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washin
            Ca_mg_gSoil = (Ca_ppm*(extract_vol_ml/1000))/(weight_g),
            Mn_mg_gSoil = (Mn_ppm*(extract_vol_ml/1000))/(weight_g))
 
-CAMS_14C <- openxlsx::read.xlsx("/Users/Anthony/OneDrive - UW/University of Washington/Lab Work/SCGSR/data/14C/14C_Dataframe.xlsx", sheet = 1) |> 
+CAMS_14C <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/SCGSR/data/14C/14C_Dataframe.xlsx", sheet = 1) |> 
     dplyr::rename("delta_14C" = "∆14C") |>
     arrange(desc(HLEF_ID))
 
