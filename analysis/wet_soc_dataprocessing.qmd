@@ -172,6 +172,10 @@ readr::write_csv(HLEF_HFF, here("data/dataframes/HLEF_HFF_SOConly.csv"))
 ```
 
 
+### Add ICP-MS and 14C data 
+
+- LLNL_HLEF_Extracts_ICP_MS.xlsx is an excel workbook with sheets for ICP-MS data in ppm 
+  - metal extracts are calculated using $\frac{(concentration_{ppm}*(extract volume_{ml}/1000))}{sample weight_{g}}$
 
 ```{r}
 target_maom14C <- c("HFF_mgC_gSoil", "delta_14C", "delta_14C_adj")
