@@ -30,37 +30,10 @@ knitr::opts_chunk$set(fig.align = "center", fig.show = "hold", dpi = 100,
                       echo = FALSE, 
                       message = FALSE, 
                       warning = FALSE)
-knitr::opts_knit$set(root.dir = '/Users/Anthony/OneDrive - UW/University of Washington/Data and Modeling/')
 
 #knitr::knit_hooks$set(webgl = hook_webgl)
 rgl::setupKnitr(autoprint = TRUE)
-
-r.sq <- function(y,y.fitted){
-    res <- y-y.fitted
-    1-sum(res^2)/sum((y-mean(y))^2)
-}
-
-check_assump_func <- function(model) {
-  plot(model)
-  plot(model, resid(.) ~ fitted(.)|sample_ID, abline = 0, ylab = "Model Residuals", xlab = "Fitted Model")
-  
-  qqnorm(resid(model))
-  qqline(resid(model))
-  
-  lev <- hat(model.matrix(model))
-  plot(resid(model) ~ lev, xlab = "Leverage", ylab = "Model Residuals")
-  
-  cd <- cooks.distance(model)
-  plot(x = lev, y = cd, xlab = "Leverage", ylab = "Cooks Distance", ylim = c(0,1))
-  # legend("topleft",
-  #        legend = "Cooks Distance", 
-  #        text.col = "blue",
-  #        pch = 1,
-  #        col = "blue")
-  
-  hist(as.vector(unlist(ranef(model)$sample_ID)), main = "", xlab = "Random Effect Conditional Means")
-}
-
+source(here("analysis/functions.R"))
 ```
 
 
@@ -112,183 +85,30 @@ HLEF_HFF |> group_by(HPU) |>
 
 
 ```{r}
-
-summarize_glmm <- function(data, 
-                           response, 
-                           predictor, 
-                           random = "sample_ID",
-                           family = Gamma(link = "log"),
-                           adjust = "tukey") {
-  
-  # Build formula
-  formula <- as.formula(
-    paste0(response, " ~ ", predictor, " + (1|", random, ")")
-  )
-  
-  # Fit model
-  model <- glmer(formula, data = data, family = family)
-  
-  # Extract coefficient estimates
-  coef_tbl <- tidy(model, effects = "fixed", conf.int = TRUE) |>
-    dplyr::mutate(component = "Coefficients") |>
-    dplyr::select(component, term, estimate, std.error, conf.low, conf.high, p.value)
-  
-  # Extract ANOVA results
-  anova_res <- car::Anova(model)
-  anova_tbl <- tibble(
-    component = "ANOVA",
-    term = rownames(anova_res),
-    estimate = anova_res$Chisq,
-    std.error = NA_real_,
-    conf.low = NA_real_,
-    conf.high = NA_real_,
-    p.value = anova_res$`Pr(>Chisq)`
-  )
-  
-  # Extract emmeans contrasts
-  em <- emmeans(model, as.formula(paste0("pairwise ~ ", predictor)), adjust = adjust)
-  contrasts_tbl <- tidy(em$contrasts, conf.int = TRUE) |>
-    dplyr::mutate(component = "Contrasts") |>
-    dplyr::select(component, term = contrast, estimate, std.error, conf.low, conf.high, p.value = adj.p.value)
-  
-  # Combine all results
-  results <- dplyr::bind_rows(coef_tbl, anova_tbl, contrasts_tbl)
-  
-  # Create gt table
-  results |>
-    gt(groupname_col = "component") |>
-    fmt_number(columns = c(estimate, std.error, conf.low, conf.high), decimals = 4) |>
-    fmt_scientific(columns = p.value, decimals = 2) |>
-    cols_label(
-      term = "Term",
-      estimate = "Estimate/χ²",
-      std.error = "SE",
-      conf.low = "CI Low",
-      conf.high = "CI High",
-      p.value = "p-value"
-    ) |>
-    sub_missing(missing_text = "—") |>
-    tab_header(title = paste("GLMM Results:", response, "~", predictor))
-}
+summarize_glmm(HLEF_HFF, response = "carbon_perc", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "TOC", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "nitrogen_perc", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "bulkCN", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "ph", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "clay", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "siltclay", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "depth_cm", predictor = "HPU")
 ```
 
-```{r}
-
-```
-
-
-```{r}
-print("***************SOC****************")
-lmC <- glmer((carbon_perc) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-check_assump_func(lmC)
-car::Anova(lmC)
-emC <- emmeans(lmC, pairwise ~ HPU, adjust = "tukey")
-emC$contrasts
-
-print("***************TOC****************")
-lmTOC <- glmer((TOC) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-check_assump_func(lmTOC)
-Anova(lmTOC)
-emTOC <- emmeans(lmTOC, specs = pairwise ~ HPU, adjust = "tukey")
-emTOC$contrasts
-
-lmN <- glmer((nitrogen_perc) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-Anova(lmN)
-emN <- emmeans(lmN, specs = pairwise ~ HPU, adjust = "tukey")
-emN$contrasts
-print("Nitrogen")
-
-lmBCN <- glmer((bulkCN) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-Anova(lmBCN)
-emBCN <- emmeans(lmBCN, specs = pairwise ~ HPU, adjust = "tukey")
-emBCN$contrasts
-print("C/N")
-print("***************Clay****************")
-lmClay <- glmer((clay) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-check_assump_func(lmClay)
-Anova(lmClay)
-emClay <- emmeans(lmClay, specs = pairwise ~ HPU, adjust = "tukey")
-emClay$contrasts
-print("***************pH****************")
-lmpH <- glmer((ph) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = gaussian(link = "identity"))
-check_assump_func(lmpH)
-Anova(lmpH)
-empH <- emmeans(lmpH, specs = pairwise ~ HPU, adjust = "tukey")
-empH$contrasts
-print("***************Depth****************")
-lmDepth <- glmer((depth_cm) ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
-check_assump_func(lmDepth)
-Anova(lmDepth)
-emDepth <- emmeans(lmDepth, specs = pairwise ~ HPU, adjust = "tukey")
-emDepth$contrasts
-```
 
 ### Extractable Metals 
 
 ```{r}
-print("***************FeDC****************")
-lm_FeDC <- glmer((Fe_mg_gSoil_DC) ~ HPU + (1|sample_ID), 
-                 data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"), 
-                 control = glmerControl(optimizer = "nloptwrap"))
-check_assump_func(lm_FeDC)
-Anova(lm_FeDC)
-emFeDC <- emmeans(lm_FeDC, specs = pairwise ~ HPU, adjust = "tukey")
-emFeDC$contrasts
-print("***************FeAO***************")
-lm_FeAO <- glmer((Fe_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lm_FeAO)
-Anova(lm_FeAO)
-emFeAO <- emmeans(lm_FeAO, specs = pairwise ~ HPU, adjust = "tukey")
-emFeAO$contrasts
-print("***************FeAODC***************")
-lm_FeAODC <- glmer((Fe_AODC_ratio) ~ HPU + (1|sample_ID), 
-                       data = HLEF_HFF_14C_DC_AO_trans, 
-                       family = Gamma(link = "log"), 
-                   control = glmerControl(optimizer = "nloptwrap"))
-check_assump_func(lm_FeAODC)
-Anova(lm_FeAODC)
-em_FeAODC <- emmeans(lm_FeAODC, specs = pairwise ~ HPU, adjust = "tukey")
-em_FeAODC$contrasts
-
-print("***************AlDC***************")
-lm_AlDC <- glmer((Al_mg_gSoil_DC) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lm_AlDC)
-Anova(lm_AlDC)
-emAlDC <- emmeans(lm_AlDC, specs = pairwise ~ HPU, adjust = "tukey")
-emAlDC$contrasts
-print("***************AlAO***************")
-lm_AlAO <- glmer((Al_mg_gSoil_AO) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lm_AlAO)
-Anova(lm_AlAO)
-emAlAO <- emmeans(lm_AlAO, specs = pairwise ~ HPU, adjust = "tukey")
-emAlAO$contrasts
-print("***************AlAODC***************")
-lm_AlAODC <- glmer((Al_AODC_ratio) ~ HPU + (1|sample_ID), 
-                       data = HLEF_HFF_14C_DC_AO_trans, 
-                       family = Gamma(link = "log"), 
-                   control = glmerControl(optimizer = "optimx", 
-                                      optCtrl = list(method = "L-BFGS-B")))
-summary(lm_AlAODC)
-check_assump_func(lm_AlAODC)
-Anova(lm_AlAODC)
-em_AlAODC <- emmeans(lm_AlAODC, specs = pairwise ~ HPU, adjust = "tukey")
-em_AlAODC$contrasts
-# print("Ca")
-# lm_CaDC <- glmer((Ca_mg_gSoil) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DithCit_df, family = Gamma(link = "log"))
-# Anova(lm_CaDC)
-# emCaDC <- emmeans(lm_CaDC, specs = pairwise ~ HPU, adjust = "tukey")
-# emCaDC$contrasts
-# print("Mn")
-# lm_MnDC <- glmer((Mn_mg_gSoil) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DithCit_df, family = Gamma(link = "log"))
-# check_assump_func(lm_MnDC)
-# Anova(lm_MnDC)
-# emMnDC <- emmeans(lm_MnDC, specs = pairwise ~ HPU, adjust = "tukey")
-# emMnDC$contrasts
-# print("Si")
-# lm_SiDC <- glmer((Si_mg_gSoil) ~ HPU + (1|sample_ID), data = HLEF_HFF_14C_DithCit_df, family = Gamma(link = "log"))
-# Anova(lm_SiDC)
-# emSiDC <- emmeans(lm_SiDC, specs = pairwise ~ HPU, adjust = "tukey")
-# emSiDC$contrasts
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_AODC_ratio", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_AODC_ratio", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Ca_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Ca_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Mn_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Mn_mg_gSoil_DC", predictor = "HPU")
 ```
 
 
@@ -296,30 +116,13 @@ em_AlAODC$contrasts
 MAOM-C content(mg/g) between HPUs or depth?
 
 ```{r}
-maoc_lm <- glmer((HFF_mgC_gSoil) ~ (HPU) + (1|sample_ID), 
-                 data = HLEF_HFF, family = Gamma(link = "log"))
-summary(maoc_lm)
-car::Anova(maoc_lm, type = 2)
-
-#TukeyHSD(maoc_lm, "HPU")
-
-emm_maoc <- emmeans(maoc_lm, specs = pairwise ~ HPU, adjust = "tukey")
-emm_maoc
-
-```
-
-
-```{r}
-
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "depth_cm")
+summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "depth_cm*HPU")
 maoc_depthHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_cm +(1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-summary(maoc_depthHPU_lm)
-Anova(maoc_depthHPU_lm)
-emm_maoc_depthHPU_lm <- emtrends(maoc_depthHPU_lm, specs = pairwise ~ HPU, var = "depth_cm",
-                               regrid = "response", adjust = "tukey")
-emm_maoc_depthHPU_lm
 emmip(maoc_depthHPU_lm, HPU~depth_cm, cov.reduce = range)
-
 ```
+
 
 MAOM-C content with SOC  content
 
