@@ -116,12 +116,20 @@ From HLEF2022LAB.xlsx - HLEF_FullData
 ```{r}
 HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "HLEF_FullData") |>
     mutate(top = case_when(is.na(depth_cm - lag(depth_cm)) ~ 0,
-                               .default = lag(depth_cm)), 
-            bottom = depth_cm, 
-            center = abs(top - (top - bottom)/2),
-            thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
-                              bottom - lag(bottom) < 0 ~ bottom,
-                              bottom - lag(bottom) > 0 ~ bottom - lag(bottom)),
+                                (depth_cm - lag(depth_cm)) < 0 ~ 0, 
+                                .default = lag(depth_cm)), 
+                bottom = depth_cm, 
+                center = abs(top - (top - bottom)/2),
+                thick = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
+                                  (bottom-top) < 0 ~ bottom,
+                                  ### uncomment this code to calculate metrics for 100cm only
+                                  #bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
+                                  #bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
+                                  #bottom > 100 & top > 100 ~ 0,
+                                  #bottom < 100 & bottom - lag(bottom) < 0 ~ bottom,
+                                  #bottom < 100 & bottom - lag(bottom) > 0 ~ bottom - lag(bottom),
+                                  #bottom == 100 ~ bottom - lag(bottom),
+                                  .default = bottom-top),
             thick100 = case_when(is.na(depth_cm - lag(depth_cm)) ~ bottom,
                                     bottom > 100 & top < 100 ~ bottom - (bottom -100)-lag(bottom),
                                     bottom > 100 & top == 0 ~ bottom - (bottom -100)-0,
@@ -138,7 +146,11 @@ HLEF_Full <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLE
                100*((HFF_percC/100)*BD_g_cm3*thick*(1-(rock_perc/100))*((HFF_perc)))
            #name_short = paste0(str_sub(sample_ID, start = 1L, end = 3L))
            )
+HLEF_Full
+```
 
+
+```{r}
 HLEF_loc <- openxlsx::read.xlsx("/Users/Anthony/Documents/Lab Work/HLEF2022/HLEF2022LAB.xlsx", sheet = "LOCATION", detectDates = TRUE) |> 
     filter(sample_name != "PRE-2022")
 
@@ -147,25 +159,30 @@ l_n <- lm((nitrogen_perc) ~ carbon_perc + 0, data = HLEF_Full |> filter(nitrogen
 p_n <- predict(l_n, data.frame(carbon_perc = HLEF_Full[HLEF_Full$nitrogen_perc == 0, "carbon_perc"][1]))
 
 HLEF_HFF <- HLEF_Full |> 
-    left_join(HLEF_loc |> select(sample_name, HPU),
+    left_join(HLEF_loc |> dplyr::select(sample_name, HPU),
               by = join_by(sample_ID == sample_name)) |> 
     filter(!is.na(HFF_percC)) |> 
     left_join(y = toc_all |> dplyr::select(Name, TIC, TOC), by = join_by(HLEF_ID == Name)) |> 
-    mutate(SOC_mgC_gSoil = (carbon_perc/100)*1000,
-           HFF_mgC_gSoil = (HFF_percC/100)*(HFF/df_start_wt)*1000,
-           HFF_percC_of_soilC = ((HFF_percC/100)*HFF)/((carbon_perc/100)*df_start_wt),
+    mutate(SOC_mgC_gSoil = (carbon_perc)*10,
+           HFF_mgC_gSoil = (HFF_percC)*(HFF/df_start_wt)*10,
+           HFF_percC_of_soilC = ((HFF_percC)*HFF)/((carbon_perc)*df_start_wt),
            HFF_CN = HFF_percC/HFF_percN,
            siltclay = silt+clay,
            depth_cm = center,
            nitrogen_perc = case_when(nitrogen_perc == 0 ~ 0.01,
                               .default = nitrogen_perc),
            bulkCN = carbon_perc/nitrogen_perc) |> 
-    dplyr::select(sample_ID, HLEF_ID, HPU, lat, lon, depth_cm, BD_g_cm3, rock_perc, 
+    group_by(sample_ID) |> 
+    mutate(depth_from_org = case_when(row_number() == 1 ~ (bottom - top)/2,
+                                      .default = (bottom - min(top))/2 ) ) |> 
+    ungroup() |> 
+    dplyr::select(sample_ID, HLEF_ID, HPU, lat, lon, depth_cm, depth_from_org, 
+                  # top, bottom, thick, 
+                  BD_g_cm3, rock_perc, 
                   carbon_perc, TIC, TOC, bulkCN,
                   nitrogen_perc, ph, clay, siltclay, silt, sand, 
                   SOC_mgC_gSoil, SOC_hor_stock, SOC_hor_stock100,
                   HFF_percC, HFF_mgC_gSoil, HFF_CN, HFF_SOC_hor_stock, HFF_SOC_hor_stock_100)
-
 
 
 readr::write_csv(HLEF_HFF, here("data/dataframes/HLEF_HFF_SOConly.csv"))
@@ -229,10 +246,19 @@ HLEF_HFF_14C_DC_AO <- HLEF_HFF_14C_AmmOx_df |>
                    ) |> 
   dplyr::mutate(Al_AODC_ratio = Al_mg_gSoil_AO/Al_mg_gSoil_DC,
                 Fe_AODC_ratio = Fe_mg_gSoil_AO/Fe_mg_gSoil_DC,
-                delta_14C_adj = 1000+delta_14C)
+                delta_14C_adj = 1000+delta_14C) 
 
 
 readr::write_csv(HLEF_HFF_14C_DC_AO, here("data/dataframes/HLEF_HFF_14C_DC_AO.csv"))
+```
+
+
+Add a depth from bottom of O horizon. Basically the top horizon becomes 0 
+```{r}
+HLEF_HFF_14C_DC_AO_scale <-  HLEF_HFF_14C_DC_AO |> 
+  dplyr::mutate(across(where(is.numeric) & !starts_with("SOC_") & !starts_with("HFF_") & !c(delta_14C, `14C.age`, delta_14C_adj, lat, lon), \(x) as.vector(scale(x))))
+HLEF_HFF_14C_DC_AO_scale
+readr::write_csv(HLEF_HFF_14C_DC_AO_scale, here("data/dataframes/HLEF_HFF_14C_DC_AO_scale.csv"))
 
 ```
 
@@ -290,7 +316,7 @@ read.csv(here("data/dataframes/HLEF_TOC_MineralSoils.csv")) |> glimpse() #3
 read.csv(here("data/dataframes/HLEF_HFF_SOConly.csv")) |> glimpse() #4
 read.csv(here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv")) |> glimpse() #5
 read.csv(here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")) |> glimpse() #6
-read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) |> glimpse() #7 
+read.csv(here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) |> glimpse() #7 
 ```
 
 2. 

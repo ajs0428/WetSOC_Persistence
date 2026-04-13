@@ -6,7 +6,8 @@ format: html
 ```{r}
 #| label: setup
 
-library(tidyverse)
+library(dplyr)
+library(tidyr)
 library(lme4)
 library(car)
 library(MASS)
@@ -45,7 +46,8 @@ HLEF_TOC <- read.csv(here("data/dataframes/HLEF_TOC_MineralSoils.csv")) #|> glim
 HLEF_HFF <- read.csv(here("data/dataframes/HLEF_HFF_SOConly.csv")) #|> glimpse() #4
 HLEF_HFF_14C_DithCit_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv")) #|> glimpse() #5
 HLEF_HFF_14C_AmmOx_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")) # |> glimpse() #6
-HLEF_HFF_14C_DC_AO_trans <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) #|> glimpse() #7 
+HLEF_HFF_14C_DC_AO <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) #|> glimpse() #7 
+HLEF_HFF_14C_DC_AO_scale <- read.csv(here("data/dataframes/HLEF_HFF_14C_DC_AO_scale.csv")) #|> glimpse() #8
 ```
 
 
@@ -54,13 +56,14 @@ HLEF_HFF_14C_DC_AO_trans <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.c
 ```{r}
 HLEF_HFF |> group_by(HPU) |> 
     mutate(HPU = as.factor(HPU)) |> 
-    summarise(meanC = mean(carbon_perc),
+    summarise(meanC = mean(SOC_mgC_gSoil),
               meanTOC = mean(TOC), 
               meanN = mean(nitrogen_perc),
               meanBCN = mean(bulkCN),
               meanpH = mean(ph),
               meanClay = mean(clay),
               meanSiltClay = mean(siltclay),
+              meanDepthOrg = mean(depth_from_org),
               sdC = sd(carbon_perc),
               sdTOC = sd(TOC),
               sdN = sd(nitrogen_perc),
@@ -79,61 +82,85 @@ HLEF_HFF |> group_by(HPU) |>
               seSiltClay = sdSiltClay/sqrt(n)
            ) |> 
     dplyr::select(-starts_with("sd")) |> 
-    ggplot(aes(x = HPU, y = meanC)) +
+    ggplot(aes(x = HPU, y = meanDepthOrg)) +
     geom_col()
 ```
 
+### Quick summary of predictor models by HPU
 
 ```{r}
-summarize_glmm(HLEF_HFF, response = "carbon_perc", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "SOC_mgC_gSoil", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "TOC", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "nitrogen_perc", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "bulkCN", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "ph", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "clay", predictor = "HPU")
 summarize_glmm(HLEF_HFF, response = "siltclay", predictor = "HPU")
-summarize_glmm(HLEF_HFF, response = "depth_cm", predictor = "HPU")
+summarize_glmm(HLEF_HFF, response = "depth_from_org", predictor = "HPU")
 ```
+
+### HPU vars with significant differencs 
+
+```{r}
+SOC_mod <- glmer(SOC_mgC_gSoil ~ HPU + (1|sample_ID), data = HLEF_HFF, family = Gamma(link = "log"))
+check_assump_func(SOC_mod)
+summary(SOC_mod)
+```
+
 
 
 ### Extractable Metals 
 
 ```{r}
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_mg_gSoil_DC", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_mg_gSoil_AO", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Fe_AODC_ratio", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_mg_gSoil_DC", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_mg_gSoil_AO", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Al_AODC_ratio", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Ca_mg_gSoil_AO", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Ca_mg_gSoil_DC", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Mn_mg_gSoil_AO", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "Mn_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Fe_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Fe_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Fe_AODC_ratio", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Al_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Al_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Al_AODC_ratio", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Ca_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Ca_mg_gSoil_DC", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Mn_mg_gSoil_AO", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "Mn_mg_gSoil_DC", predictor = "HPU")
+```
+
+```{r}
+HPU_univariate <- HLEF_HFF_14C_DC_AO |> 
+  dplyr::select(HFF_mgC_gSoil, SOC_mgC_gSoil, nitrogen_perc, ph, depth_cm, depth_from_org,
+                HPU, Fe_mg_gSoil_AO, Fe_mg_gSoil_DC, Fe_AODC_ratio, Al_mg_gSoil_DC, 
+                Al_AODC_ratio, Ca_mg_gSoil_DC, Mn_mg_gSoil_DC)
+readr::write_csv(HPU_univariate, here("Data/dataframes/HPU_univariate.csv"))
 ```
 
 
-
-MAOM-C content(mg/g) between HPUs or depth?
+### MAOM-C content(mg/g) between HPUs or depth?
 
 ```{r}
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "HPU")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "depth_cm")
-summarize_glmm(HLEF_HFF_14C_DC_AO_trans, response = "HFF_mgC_gSoil", predictor = "depth_cm*HPU")
-maoc_depthHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_cm +(1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "depth_cm")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "depth_cm*HPU")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "depth_from_org")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "depth_from_org*HPU")
+```
+
+
+```{r}
+maoc_depthHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_cm +(1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
 emmip(maoc_depthHPU_lm, HPU~depth_cm, cov.reduce = range)
+
+maoc_depthorgHPU_lm <- glmer((HFF_mgC_gSoil) ~ HPU*depth_from_org +(1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
+emmip(maoc_depthorgHPU_lm, HPU~depth_from_org, cov.reduce = range)
 ```
 
 
 MAOM-C content with SOC  content
 
 ```{r}
-maoc_soc <- glmer((HFF_mgC_gSoil) ~ SOC_mgC_gSoil +(1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
+maoc_soc <- glmer((HFF_mgC_gSoil) ~ SOC_mgC_gSoil +(1|sample_ID), data = HLEF_HFF_14C_DC_AO, family = Gamma(link = "log"))
 summary(maoc_soc)
 
 HLEF_HFF_maom_soc <- HLEF_HFF |> 
   dplyr::mutate(MAOM_SOC_Diff = SOC_mgC_gSoil - HFF_mgC_gSoil)
-
-
 
 ggplot(data = HLEF_HFF_maom_soc) +
   geom_point(aes(y=HFF_mgC_gSoil, x = SOC_mgC_gSoil, fill = HPU), shape = 21) +
@@ -144,433 +171,79 @@ ggplot(data = HLEF_HFF_maom_soc) +
 MAOM-C content(mg/g) correlations with Bulk Soil properties
 
 ```{r}
-HLEF_cor <- round(cor(HLEF_HFF_14C_DC_AO_trans |> dplyr::select(HFF_mgC_gSoil, depth_cm, carbon_perc,
-                                                TOC, nitrogen_perc, clay, siltclay, ph) ), 1)
+HLEF_cor <- round(cor(HLEF_HFF_14C_DC_AO |> 
+                        dplyr::select(HFF_mgC_gSoil, depth_cm, depth_from_org, SOC_mgC_gSoil,
+                                      TOC, nitrogen_perc, clay, siltclay, ph, 
+                                      Al_mg_gSoil_AO, Fe_mg_gSoil_AO, Ca_mg_gSoil_AO,
+                                      Al_mg_gSoil_DC, Fe_mg_gSoil_DC, Ca_mg_gSoil_DC) ), 1)
 HLEF_cor_pmat <- cor_pmat(HLEF_cor)
 
-ggcorrplot(HLEF_cor, type = "lower", p.mat = HLEF_cor_pmat, 
-           sig.level = 0.05, lab = TRUE)
+corrplot::corrplot(HLEF_cor, method = "pie", type = "upper")
 
 ```
 
 ### MAOM-C Bulk Soil modeling
 
 ```{r}
-lmC_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-summary(lmC_MAOM)
-Anova(lmC_MAOM, type = 3)
-
-# lmTOC_MAOM <- glmer((HFF_mgC_gSoil) ~ TOC + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# summary(lmTOC_MAOM)
-# Anova(lmTOC_MAOM, type = 3)
-
-# lmN_MAOM <- glmer((HFF_mgC_gSoil) ~ bulkCN + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# Anova(lmN_MAOM, type = 3)
-
-lmClay_MAOM <- glmer((HFF_mgC_gSoil) ~ clay + (1|sample_ID), 
-                     data = HLEF_HFF_14C_DC_AO_trans, 
-                     family = Gamma(link = "log"),
-                     control = glmerControl(optimizer = "nloptwrap"))
-summary(lmClay_MAOM)
-Anova(lmClay_MAOM, type = 3)
-
-# lmSiltClay_MAOM <- glmer((HFF_mgC_gSoil) ~ siltclay + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# Anova(lmSiltClay_MAOM, type = 3)
-
-lmpH_MAOM <- glmer((HFF_mgC_gSoil) ~ ph + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, 
-                   family = Gamma(link = "log"))
-summary(lmpH_MAOM)
-Anova(lmpH_MAOM, type = 3)
-
-lmbulk_MAOM_HPU <- glmer((HFF_mgC_gSoil) ~ carbon_perc + clay + ph + HPU + (1|sample_ID), 
-                     data = HLEF_HFF_14C_DC_AO_trans, 
-                     family = Gamma(link = "log"),
-                     control = glmerControl(optimizer = "nloptwrap"))
-lmbulk_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + clay + ph + (1|sample_ID), 
-                     data = HLEF_HFF_14C_DC_AO_trans, 
-                     family = Gamma(link = "log"),
-                     control = glmerControl(optimizer = "nloptwrap"))
-summary(lmbulk_MAOM)
-summary(lmbulk_MAOM_HPU)
-Anova(lmbulk_MAOM, type = 3)
-Anova(lmbulk_MAOM_HPU, type = 3)
-
-
-```
-
-
-
-### MAOM-C modeling to find important variables
-
-```{r}
-lmAll_MAOM_HPU <- glmer((HFF_mgC_gSoil) ~ carbon_perc + clay + ph + HPU + 
-                          Fe_mg_gSoil_AO + Fe_mg_gSoil_DC + Al_mg_gSoil_AO +
-                          (1|sample_ID), 
-                     data = HLEF_HFF_14C_DC_AO_trans, 
-                     family = Gamma(link = "log"),
-                     control = glmerControl(optimizer = "Nelder_Mead"))
-summary(lmAll_MAOM_HPU)
-Anova(lmAll_MAOM_HPU, type = 3)
-```
-
-Parsimonious model
-```{r}
-lmAll_MAOM <- glmer((HFF_mgC_gSoil) ~ carbon_perc + ph + 
-                          Fe_mg_gSoil_DC + 
-                          (1|sample_ID), 
-                     data = HLEF_HFF_14C_DC_AO_trans, 
-                     family = Gamma(link = "log"),
-                     control = glmerControl(optimizer = "Nelder_Mead"))
-summary(lmAll_MAOM)
-Anova(lmAll_MAOM, type = 3)
-AIC(lmAll_MAOM)
-
-saveRDS(lmAll_MAOM, file = "WetSOC_Persistence/analysis/models/MAOM_All_selection.rds")
-
-```
-
-
-Linear models for examining relationships with MAOM-C content
-```{r}
-print("***************Fe***************")
-lmFeDC_MAOM <- glmer((HFF_mgC_gSoil) ~ Fe_mg_gSoil_DC + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmFeDC_MAOM)
-Anova(lmFeDC_MAOM)
-lmFeAO_MAOM <- glmer((HFF_mgC_gSoil) ~ Fe_mg_gSoil_AO + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmFeAO_MAOM)
-Anova(lmFeAO_MAOM)
-lmFeAODC_MAOM <- glmer((HFF_mgC_gSoil) ~ Fe_AODC_ratio + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmFeAODC_MAOM)
-Anova(lmFeAODC_MAOM)
-
-print("***************Al***************")
-lmAlDC_MAOM <- glmer((HFF_mgC_gSoil) ~ Al_mg_gSoil_DC + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmAlDC_MAOM)
-Anova(lmAlDC_MAOM)
-lmAlAO_MAOM <- glmer((HFF_mgC_gSoil) ~ Al_mg_gSoil_AO + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmAlAO_MAOM)
-Anova(lmAlAO_MAOM)
-lmAlAODC_MAOM <- glmer((HFF_mgC_gSoil) ~ Al_AODC_ratio + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-check_assump_func(lmAlAODC_MAOM)
-Anova(lmAlAODC_MAOM)
-# 
-# lmCaDC_MAOM <- glmer((HFF_mgC_gSoil) ~ HPU*Ca_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# Anova(lmCaDC_MAOM)
-# 
-# lmMnDC_MAOM <- glmer((HFF_mgC_gSoil) ~ HPU*Mn_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# Anova(lmMnDC_MAOM)
-# 
-# lmSiDC_MAOM <- glmer((HFF_mgC_gSoil) ~ HPU*Si_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = Gamma(link = "log"))
-# Anova(lmSiDC_MAOM)
-
-
-```
-
-### Partial correlations between bulk soil properties and MAOM-C mg g-1
-- Need to log transform still to match models
-
-```{r}
-HLEF_HFF_ppcor <- HLEF_HFF_14C_DC_AO_trans |> 
-  dplyr::mutate(poorAll = Fe_mg_gSoil_AO + Al_mg_gSoil_DC) |> 
-  dplyr::select(HFF_mgC_gSoil, delta_14C, depth_cm, carbon_perc, clay, ph,
-                Fe_mg_gSoil_DC, Al_mg_gSoil_DC, Fe_mg_gSoil_AO, Al_mg_gSoil_AO)
-
-pcor(HLEF_HFF_ppcor)$estimate |> 
-  ggcorrplot::ggcorrplot(lab = TRUE, lab_size = 2, 
-                         p.mat = pcor(HLEF_HFF_ppcor)$p.value, type = "upper")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "SOC_mgC_gSoil")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "TOC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "bulkCN")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "clay")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "siltclay")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "ph")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "clay*ph")
 ```
 
 
 ```{r}
-cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$carbon_perc)
-cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$clay)
-cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$ph)
-
-pcor.test((HLEF_HFF_ppcor$depth_cm), 
-          y = HLEF_HFF_ppcor$ph, 
-          z = HLEF_HFF_ppcor$carbon_perc)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$carbon_perc, 
-          z = HLEF_HFF_ppcor$depth_cm)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil),
-          y = HLEF_HFF_ppcor$clay, 
-          z = HLEF_HFF_ppcor$depth_cm)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$ph, 
-          z = HLEF_HFF_ppcor$depth_cm)
-
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$Fe_mg_gSoil_DC, 
-          z = HLEF_HFF_ppcor$carbon_perc)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$Fe_mg_gSoil_AO, 
-          z = HLEF_HFF_ppcor$ph)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$Al_mg_gSoil_DC, 
-          z = HLEF_HFF_ppcor$ph)
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
-          y = HLEF_HFF_ppcor$Al_mg_gSoil_AO, 
-          z = HLEF_HFF_ppcor$ph)
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Al_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Fe_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Ca_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Al_mg_gSoil_DC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Fe_mg_gSoil_DC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "HFF_mgC_gSoil", predictor = "Ca_mg_gSoil_DC")
+```
 
 
-pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), y = HLEF_HFF_ppcor$Fe_mg_gSoil_DC, 
-          z = HLEF_HFF_ppcor[, c("ph", "clay")])
+Provide a dataframe that contains only the response and significant univariate predictor for the FiguresTables.qmd
+```{r}
+MAOM_univariate <- HLEF_HFF_14C_DC_AO |> 
+  dplyr::select(HFF_mgC_gSoil, SOC_mgC_gSoil, TOC, clay, siltclay, ph, depth_cm, depth_from_org,
+                HPU,Fe_mg_gSoil_AO, Fe_mg_gSoil_DC, Al_mg_gSoil_AO)
+readr::write_csv(MAOM_univariate, here("Data/dataframes/MAOM_univariate.csv"))
+```
 
 
+### ∆14C with bulk soil measurements
 
+
+```{r}
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "SOC_mgC_gSoil")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "TOC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "bulkCN")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "clay")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "siltclay")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "depth_cm")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "depth_from_org")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "ph")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "clay*ph")
 ```
 
 ```{r}
-calculate_multiple_correlations <- function(df, target, predictors, control_vars = NULL) {
-  # Input validation
-  if(!is.data.frame(df)) {
-    stop("Input must be a dataframe")
-  }
-  
-  if(!(target %in% names(df))) {
-    stop(paste("Target variable", target, "not found in dataframe"))
-  }
-  
-  if(!all(predictors %in% names(df))) {
-    missing_predictors <- predictors[!(predictors %in% names(df))]
-    stop(paste("Predictor variable(s) not found in dataframe:", 
-               paste(missing_predictors, collapse = ", ")))
-  }
-  
-  if(!is.null(control_vars)) {
-    missing_controls <- control_vars[!(control_vars %in% names(df))]
-    if(length(missing_controls) > 0) {
-      stop(paste("Control variable(s) not found in dataframe:", 
-                 paste(missing_controls, collapse = ", ")))
-    }
-  }
-  
-  # Check for ppcor package
-  if(!is.null(control_vars) && length(control_vars) > 0) {
-    if(!requireNamespace("ppcor", quietly = TRUE)) {
-      stop("Package 'ppcor' is needed for partial correlations. Please install it.")
-    }
-  }
-  
-  # Initialize empty result dataframe
-  results <- data.frame(
-    predictor = character(),
-    zero_order_r = numeric(),
-    zero_order_pvalue = numeric(),
-    control_variables = character(),
-    partial_r = numeric(),
-    partial_pvalue = numeric(),
-    stringsAsFactors = FALSE
-  )
-  
-  # Calculate correlations for each predictor
-  for(pred in predictors) {
-    # Calculate zero-order correlation
-    zero_order_model <- cor.test(df[[target]], df[[pred]])
-    zero_order_r <- zero_order_model$estimate
-    zero_order_pvalue <- zero_order_model$p.value
-    
-    # Calculate partial correlation (if control variables are provided)
-    if(is.null(control_vars) || length(control_vars) == 0) {
-      partial_r <- NA
-      partial_pvalue <- NA
-      control_vars_str <- NA
-    } else {
-      # Calculate partial correlation
-      partial_result <- ppcor::pcor.test(
-        x = df[[pred]],
-        y = df[[target]],
-        z = df[, control_vars, drop = FALSE]
-      )
-      
-      partial_r <- partial_result$estimate
-      partial_pvalue <- partial_result$p.value
-      control_vars_str <- paste(control_vars, collapse = ", ")
-    }
-    
-    # Create result row for this predictor
-    result_row <- data.frame(
-      predictor = pred,
-      zero_order_r = zero_order_r,
-      zero_order_pvalue = zero_order_pvalue,
-      control_variables = ifelse(is.na(control_vars_str), "None", control_vars_str),
-      partial_r = partial_r,
-      partial_pvalue = partial_pvalue,
-      stringsAsFactors = FALSE
-    )
-    
-    # Append to results dataframe
-    results <- rbind(results, result_row)
-  }
-  
-  return(results)
-}
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Al_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Fe_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Ca_mg_gSoil_AO")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Al_mg_gSoil_DC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Fe_mg_gSoil_DC")
+summarize_glmm(HLEF_HFF_14C_DC_AO, response = "delta_14C", predictor = "Ca_mg_gSoil_DC")
 ```
 
 
 ```{r}
-bulk_extract_tot_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "HFF_mgC_gSoil", 
-                       predictor = c("depth_cm", "carbon_perc", "ph", "clay"), 
-                       control_vars = c("Fe_mg_gSoil_DC", 
-                                        "Al_mg_gSoil_AO"))
-bulk_extract_poor_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "HFF_mgC_gSoil", 
-                       predictor = c("depth_cm", "carbon_perc", "ph", "clay"), 
-                       control_vars = c("Fe_mg_gSoil_AO", 
-                                        "Al_mg_gSoil_DC"))
-extract_tot_bulk_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "HFF_mgC_gSoil", 
-                       predictor = c("Fe_mg_gSoil_DC", 
-                                        "Al_mg_gSoil_AO"), 
-                       control_vars = c("depth_cm", "carbon_perc", "ph", "clay"))
-extract_poor_bulk_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "HFF_mgC_gSoil", 
-                       predictor = c("Fe_mg_gSoil_AO", 
-                                        "Al_mg_gSoil_DC"), 
-                       control_vars = c("depth_cm", "carbon_perc", "ph", "clay"))
-
-
-readr::write_csv(bulk_extract_tot_cor, "WetSOC_Persistence/data/dataframes/bulk_extract_total_cor_pcor_comparison.csv")
-readr::write_csv(bulk_extract_poor_cor, "WetSOC_Persistence/data/dataframes/bulk_extract_poorCry_cor_pcor_comparison.csv")
-readr::write_csv(extract_tot_bulk_cor, "WetSOC_Persistence/data/dataframes/extract_total_bulk_cor_pcor_comparison.csv")
-readr::write_csv(extract_poor_bulk_cor, "WetSOC_Persistence/data/dataframes/extract_poorCry_bulk_cor_pcor_comparison.csv")
-
+MAOM_14C_univariate <- HLEF_HFF_14C_DC_AO |> 
+  dplyr::select(delta_14C, SOC_mgC_gSoil, TOC, ph, depth_cm, depth_from_org, 
+                HPU, Fe_mg_gSoil_DC)
+readr::write_csv(MAOM_14C_univariate, here("Data/dataframes/MAOM_14C_univariate.csv"))
 ```
 
-
-Is there a difference in the ∆14C between HPUs?
-
-```{r}
-
-maoc_14C_lm <- lmer((delta_14C) ~ HPU + (1|sample_ID),
-                     data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(maoc_14C_lm)
-summary(maoc_14C_lm)
-Anova(maoc_14C_lm)
-emmeans(maoc_14C_lm, pairwise ~ HPU)
-
-
-
-
-```
-```{r}
-maoc_14C_depth_lm <- lmer((delta_14C) ~ HPU*depth_cm + (1|sample_ID),
-                     data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(maoc_14C_depth_lm)
-summary(maoc_14C_depth_lm)
-Anova(maoc_14C_depth_lm)
-emmeans(maoc_14C_depth_lm, pairwise ~ HPU)
-```
-
-
-
-14C Correlations 
-
-```{r}
-lmC_MAOM_14C <- lmer((delta_14C_adj) ~ carbon_perc + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-summary(lmC_MAOM_14C)
-check_assump_func(lmC_MAOM_14C)
-Anova(lmC_MAOM_14C)
-
-# lmCN_MAOM_14C <- glmer((delta_14C_adj) ~ bulkCN + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = gaussian(link = "identity"))
-# Anova(lmCN_MAOM_14C)
-
-lmClay_MAOM_14C <- lmer((delta_14C_adj) ~ clay + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmClay_MAOM_14C)
-Anova(lmClay_MAOM_14C)
-
-# lmSiltClay_MAOM_14C <- glmer((delta_14C_adj) ~ siltclay + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = gaussian(link = "identity"))
-# Anova(lmSiltClay_MAOM_14C)
-
-lmpH_MAOM_14C <- lmer((delta_14C_adj) ~ ph + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-summary(lmpH_MAOM_14C)
-check_assump_func(lmpH_MAOM_14C)
-Anova(lmpH_MAOM_14C)
-
-lmDepth_MAOM_14C <- lmer((delta_14C_adj) ~ depth_cm + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-summary(lmDepth_MAOM_14C)
-check_assump_func(lmDepth_MAOM_14C)
-Anova(lmDepth_MAOM_14C)
-
-```
-
-```{r}
-print("***************Fe***************")
-lmFeDC_MAOM_14C <- lmer((delta_14C_adj) ~ Fe_mg_gSoil_DC + (1|sample_ID), 
-                         data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmFeDC_MAOM_14C)
-summary(lmFeDC_MAOM_14C)
-Anova(lmFeDC_MAOM_14C)
-lmFeAO_MAOM_14C <- lmer((delta_14C_adj) ~ Fe_mg_gSoil_AO + (1|sample_ID), 
-                         data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmFeAO_MAOM_14C)
-summary(lmFeAO_MAOM_14C)
-Anova(lmFeAO_MAOM_14C)
-lmFeAODC_MAOM_14C <- lmer((delta_14C_adj) ~ Fe_AODC_ratio + (1|sample_ID), 
-                           data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmFeAODC_MAOM_14C)
-summary(lmFeAODC_MAOM_14C)
-Anova(lmFeAODC_MAOM_14C)
-
-print("***************Al***************")
-lmAlDC_MAOM_14C <- lmer((delta_14C_adj) ~ Al_mg_gSoil_DC + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmAlDC_MAOM_14C)
-summary(lmAlDC_MAOM_14C)
-Anova(lmAlDC_MAOM_14C)
-lmAlAO_MAOM_14C <- lmer((delta_14C_adj) ~ Al_mg_gSoil_AO + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmAlAO_MAOM_14C)
-summary(lmAlAO_MAOM_14C)
-Anova(lmAlAO_MAOM_14C)
-lmAlAODC_MAOM_14C <- lmer((delta_14C_adj) ~ Al_AODC_ratio + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-check_assump_func(lmAlAODC_MAOM_14C)
-summary(lmAlAODC_MAOM_14C)
-Anova(lmAlAODC_MAOM_14C)
-
-# lmCaDC_MAOM_14C <- lmer((delta_14C_adj) ~ Ca_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans)
-# Anova(lmCaDC_MAOM_14C)
-# 
-# lmMnDC_MAOM_14C <- glmer((delta_14C_adj) ~ Mn_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = gaussian(link = "identity"))
-# Anova(lmMnDC_MAOM_14C)
-# 
-# lmSiDC_MAOM_14C <- glmer((delta_14C_adj) ~ Si_mg_gSoil + (1|sample_ID), data = HLEF_HFF_14C_DC_AO_trans, family = gaussian(link = "identity"))
-# Anova(lmSiDC_MAOM_14C)
-
-
-```
-
-
-
-### Partial Correlation 14C
-
-```{r}
-bulk_extract_tot_cor14C <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "delta_14C", 
-                       predictor = c("depth_cm", "carbon_perc", "ph", "clay"), 
-                       control_vars = c("Fe_mg_gSoil_DC", 
-                                        "Al_mg_gSoil_AO"))
-bulk_extract_poor_cor14C <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "delta_14C", 
-                       predictor = c("depth_cm", "carbon_perc", "ph", "clay"), 
-                       control_vars = c("Fe_mg_gSoil_AO", 
-                                        "Al_mg_gSoil_DC"))
-extract_tot_bulk_cor14C <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "delta_14C", 
-                       predictor = c("Fe_mg_gSoil_DC", 
-                                        "Al_mg_gSoil_AO"), 
-                       control_vars = c("depth_cm", "carbon_perc", "ph", "clay"))
-extract_poor_bulk_cor14C <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
-                       target = "delta_14C", 
-                       predictor = c("Fe_mg_gSoil_AO", 
-                                        "Al_mg_gSoil_DC"), 
-                       control_vars = c("depth_cm", "carbon_perc", "ph", "clay"))
-
-
-readr::write_csv(bulk_extract_tot_cor14C, "WetSOC_Persistence/data/dataframes/bulk_extract_total_cor14C_pcor_comparison.csv")
-readr::write_csv(bulk_extract_poor_cor14C, "WetSOC_Persistence/data/dataframes/bulk_extract_poorCry_cor14C_pcor_comparison.csv")
-readr::write_csv(extract_tot_bulk_cor14C, "WetSOC_Persistence/data/dataframes/extract_total_bulk_cor14C_pcor_comparison.csv")
-readr::write_csv(extract_poor_bulk_cor14C, "WetSOC_Persistence/data/dataframes/extract_poorCry_bulk_cor14C_pcor_comparison.csv")
-
-
-```
 

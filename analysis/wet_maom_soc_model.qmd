@@ -1,0 +1,189 @@
+---
+title: "Wetland SOC & MAOM Analysis"
+format: html
+---
+
+```{r}
+#| label: setup
+
+library(dplyr)
+library(tidyr)
+library(lme4)
+library(car)
+library(MASS)
+library(lmerTest)
+library(emmeans)
+library(ppcor)
+library(ggcorrplot)
+library(RColorBrewer)
+library(webshot)
+library(kableExtra)
+library(formatR)
+library(openxlsx)
+library(here)
+
+knitr::opts_chunk$set(fig.align = "center", fig.show = "hold", dpi = 100,
+                      tidy.opts = list(width.cutoff = 60), 
+                      tidy = T, 
+                      collapse = TRUE, 
+                      echo = FALSE, 
+                      message = FALSE, 
+                      warning = FALSE)
+#knitr::knit_hooks$set(webgl = hook_webgl)
+rgl::setupKnitr(autoprint = TRUE)
+source(here("analysis/functions.R"))
+```
+
+
+data import 
+```{r}
+HLEF_HPU <- read.csv(here("data/dataframes/HLEF_HPUonly.csv")) #|> glimpse() #1
+HLEF_SOC_All <- read.csv(here("data/dataframes/HLEF_SOC_AllOrgMin.csv")) #|> glimpse() #2
+HLEF_TOC <- read.csv(here("data/dataframes/HLEF_TOC_MineralSoils.csv")) #|> glimpse() #3
+HLEF_HFF <- read.csv(here("data/dataframes/HLEF_HFF_SOConly.csv")) #|> glimpse() #4
+HLEF_HFF_14C_DithCit_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_DithCit_df.csv")) #|> glimpse() #5
+HLEF_HFF_14C_AmmOx_df <- read.csv(here("data/dataframes/HLEF_HFF_14C_AmmOx_df.csv")) # |> glimpse() #6
+HLEF_HFF_14C_DC_AO <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv")) #|> glimpse() #7 
+HLEF_HFF_14C_DC_AO_scale <- read.csv(here("data/dataframes/HLEF_HFF_14C_DC_AO_scale.csv")) #|> glimpse() #8
+```
+
+
+### MAOM-C modeling to find important variables
+
+  - Scale and center variables using `HLEF_HFF_14C_DC_AO_scale.csv`
+
+```{r}
+#| cache: True
+#| eval: False
+
+lmAll_MAOM_HPU <- glmer((HFF_mgC_gSoil) ~ TOC + clay + siltclay + ph + 
+                          HPU*(Fe_mg_gSoil_AO + Fe_mg_gSoil_DC + Al_mg_gSoil_AO) +
+                          depth_from_org +
+                          (1|sample_ID), 
+                     data = HLEF_HFF_14C_DC_AO_scale, 
+                     na.action = "na.fail", 
+                     family = Gamma(link = "log"), control = glmerControl(optimizer = "bobyqa")
+                     )
+
+system.time({
+  m <- MuMIn::dredge(global.model = lmAll_MAOM_HPU, m.lim = c(1, 12), rank = "AIC",
+                   subset = expression(with(HPU) & (depth_from_org)))
+  })
+print(m)
+MAOM_C_dredge_mod <- MuMIn::get.models(m, delta ==0)[[1]]
+summary(MAOM_C_dredge_mod)
+formula(MAOM_C_dredge_mod)
+
+# allFit(MAOM_C_dredge_mod) # Use bobyqa optimizer
+performance::model_performance(MAOM_C_dredge_mod)
+tidy(MAOM_C_dredge_mod, conf.int = TRUE)
+
+saveRDS(MAOM_C_dredge_mod, here("analysis/models/MAOM_C_dredge_selection.rds"))
+```
+
+
+```{r}
+MAOM_C_dredge_mod <- readRDS(here("analysis/models/MAOM_C_dredge_selection.rds"))
+performance::model_performance(MAOM_C_dredge_mod)
+tidy(MAOM_C_dredge_mod, conf.int = TRUE)
+```
+### Emmeans trends
+
+```{r}
+emmip(MAOM_C_dredge_mod, ~ Al_mg_gSoil_AO*HPU)
+```
+
+
+```{r}
+MAOM_trend <- emtrends(MAOM_C_dredge_mod, ~ HPU, var = "Al_mg_gSoil_AO")
+MAOM_trend
+pairs(MAOM_trend)
+saveRDS(MAOM_trend, here("analysis/models/MAOM_C_dredge_selection_trend.rds"))
+```
+
+
+### Partial correlations between bulk soil properties and MAOM-C mg g-1
+- Need to log transform still to match models
+
+```{r}
+HLEF_HFF_ppcor <- HLEF_HFF_14C_DC_AO_scale |> 
+  dplyr::mutate(poorAll = Fe_mg_gSoil_AO + Al_mg_gSoil_DC) |> 
+  dplyr::select(HFF_mgC_gSoil, delta_14C, depth_from_org, carbon_perc, clay, ph,
+                Fe_mg_gSoil_DC, Al_mg_gSoil_DC, Fe_mg_gSoil_AO, Al_mg_gSoil_AO)
+
+pcor(HLEF_HFF_ppcor)$estimate |> 
+  ggcorrplot::ggcorrplot(lab = TRUE, lab_size = 2, 
+                         p.mat = pcor(HLEF_HFF_ppcor)$p.value, type = "upper", method = "circle")
+```
+
+
+```{r}
+cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$carbon_perc)
+cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$clay)
+cor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), HLEF_HFF_ppcor$ph)
+
+pcor.test((HLEF_HFF_ppcor$depth_from_org), 
+          y = HLEF_HFF_ppcor$ph, 
+          z = HLEF_HFF_ppcor$carbon_perc)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$carbon_perc, 
+          z = HLEF_HFF_ppcor$depth_from_org)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil),
+          y = HLEF_HFF_ppcor$clay, 
+          z = HLEF_HFF_ppcor$depth_from_org)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$ph, 
+          z = HLEF_HFF_ppcor$depth_from_org)
+
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$Fe_mg_gSoil_DC, 
+          z = HLEF_HFF_ppcor$carbon_perc)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$Fe_mg_gSoil_AO, 
+          z = HLEF_HFF_ppcor$ph)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$Al_mg_gSoil_DC, 
+          z = HLEF_HFF_ppcor$ph)
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), 
+          y = HLEF_HFF_ppcor$Al_mg_gSoil_AO, 
+          z = HLEF_HFF_ppcor$ph)
+
+
+pcor.test((HLEF_HFF_ppcor$HFF_mgC_gSoil), y = HLEF_HFF_ppcor$Fe_mg_gSoil_DC, 
+          z = HLEF_HFF_ppcor[, c("ph", "clay")])
+
+
+
+```
+
+
+```{r}
+bulk_extract_tot_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
+                       target = "HFF_mgC_gSoil", 
+                       predictor = c("depth_from_org", "carbon_perc", "ph", "clay"), 
+                       control_vars = c("Fe_mg_gSoil_DC", 
+                                        "Al_mg_gSoil_AO"))
+bulk_extract_poor_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
+                       target = "HFF_mgC_gSoil", 
+                       predictor = c("depth_from_org", "carbon_perc", "ph", "clay"), 
+                       control_vars = c("Fe_mg_gSoil_AO", 
+                                        "Al_mg_gSoil_DC"))
+extract_tot_bulk_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
+                       target = "HFF_mgC_gSoil", 
+                       predictor = c("Fe_mg_gSoil_DC", 
+                                        "Al_mg_gSoil_AO"), 
+                       control_vars = c("depth_from_org", "carbon_perc", "ph", "clay"))
+extract_poor_bulk_cor <- calculate_multiple_correlations(df = HLEF_HFF_ppcor, 
+                       target = "HFF_mgC_gSoil", 
+                       predictor = c("Fe_mg_gSoil_AO", 
+                                        "Al_mg_gSoil_DC"), 
+                       control_vars = c("depth_from_org", "carbon_perc", "ph", "clay"))
+
+
+readr::write_csv(bulk_extract_tot_cor, here("data/dataframes/bulk_extract_total_cor_pcor_comparison.csv"))
+readr::write_csv(bulk_extract_poor_cor, here("data/dataframes/bulk_extract_poorCry_cor_pcor_comparison.csv"))
+readr::write_csv(extract_tot_bulk_cor, here("data/dataframes/extract_total_bulk_cor_pcor_comparison.csv"))
+readr::write_csv(extract_poor_bulk_cor, here("data/dataframes/extract_poorCry_bulk_cor_pcor_comparison.csv"))
+
+```
+
