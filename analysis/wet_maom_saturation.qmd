@@ -9,9 +9,10 @@ library(readr)
 library(stringr)
 library(here)
 library(ggplot2)
+library(quantreg)
 here()
 
-source("analysis/functions.R")
+source(here("analysis/functions.R"))
 ```
 
 
@@ -24,3 +25,93 @@ glimpse(HLEF_HFF_14C_DC_AO)
 
 ```
 
+
+```{r}
+
+HLEF_HFF_14C_DC_AO_Sat <- HLEF_HFF_14C_DC_AO |> 
+    dplyr::mutate(Alao_Fedc_sat = Al_mg_gSoil_AO + 0.5*Fe_mg_gSoil_DC)
+
+hist(HLEF_HFF_14C_DC_AO_Sat$Alao_Fedc_sat)
+```
+
+```{r}
+#| label: saturation equations
+rfit95 <- rq(
+  HFF_mgC_gSoil ~ siltclay + 0,
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  tau = 0.95
+)
+rfit95
+
+rfit99 <- rq(
+  HFF_mgC_gSoil ~ siltclay + 0,
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  tau = 0.99
+)
+rfit99
+
+summary(rfit)
+saveRDS(rfit, here("analysis/models/MAOM_C_quantreg_siltclay.rds"))
+
+
+rfit95_m <- rq(
+  HFF_mgC_gSoil ~ Alao_Fedc_sat + 0,
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  tau = 0.95
+)
+
+rfit99_m <- rq(
+  HFF_mgC_gSoil ~ Alao_Fedc_sat + 0,
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  tau = 0.99
+)
+
+summary(rfit_m)
+saveRDS(rfit_m, here("analysis/models/MAOM_C_quantreg_Alao_Fedc_sat.rds"))
+```
+
+
+
+```{r}
+ggplot(
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  aes(x = siltclay, y = HFF_mgC_gSoil, fill = HPU)
+) +
+  geom_point(size = 3, shape = 21) +
+  geom_abline(
+    aes(slope = rfit$coefficients[[1]], intercept = 0),
+    lty = 3,
+    linewidth = 1.5,
+    show.legend = NA,
+    alpha = 0.7
+  ) +
+  xlim(0, 90) +
+  ylim(0, 90)
+
+```
+
+
+
+```{r}
+ggplot(
+  data = HLEF_HFF_14C_DC_AO_Sat,
+  aes(x = Alao_Fedc_sat, y = HFF_mgC_gSoil, fill = HPU)
+) +
+  geom_point(size = 3, shape = 21) +
+  geom_abline(
+    aes(slope = rfit95_m$coefficients[[1]], intercept = 0),
+    lty = 3,
+    linewidth = 1.5,
+    show.legend = NA,
+    alpha = 0.7
+  ) +
+  geom_abline(
+    aes(slope = rfit99_m$coefficients[[1]], intercept = 0),
+    lty = 3,
+    linewidth = 1.5,
+    show.legend = NA,
+    alpha = 0.7
+  ) +
+  xlim(0, 75) +
+  ylim(0, 75)
+```
