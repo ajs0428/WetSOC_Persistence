@@ -1,0 +1,26 @@
+
+```{r}
+#| label: setup
+
+
+library(tidyr)
+library(dplyr)
+library(readr)
+library(stringr)
+library(here)
+library(ggplot2)
+here()
+
+source("analysis/functions.R")
+```
+
+
+Import Data
+```{r}
+#| label: data_import
+
+HLEF_HFF_14C_DC_AO <- read.csv( here("data/dataframes/HLEF_HFF_14C_DC_AO.csv"))
+glimpse(HLEF_HFF_14C_DC_AO)
+
+```
+
